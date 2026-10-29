@@ -37,6 +37,29 @@ automatically discovers `lib/` and `lib64/` there. This machine was tested with
 SDL2 2.32.10 and Intel UHD Graphics 620 on Vulkan. The sandbox's software Vulkan
 renderer is much slower; hardware GPU access is needed for a useful play test.
 
+## Performance
+
+For the tested Intel i5-8350U / UHD 620 laptop, try:
+
+```sh
+bash scripts/play.sh --performance
+```
+
+This disables the separate vector-unit thread and texture predecode, keeping
+the render thread enabled. On a short Coastal Parklands race checkpoint this
+improved the window's frame counter from 28–30 to 35–36 fps on battery power.
+These are emulated video frames; the game may draw a new picture every other
+frame. This is still below full speed, and other PCs or scenes may differ.
+Omit `--performance` to restore upstream defaults.
+
+Plug into mains power and select the desktop's Performance power profile when
+available. Keep `PS2_SCALE=1`; higher internal resolutions add graphics work.
+The build already uses Release optimization and AVX2 when supported. In the
+profiled scene all VU1 calls were compiled, so further interpreter warmup did
+not address the sustained slowdown. Graphics command processing and driver
+overhead were substantial costs. Reaching full speed may require renderer
+optimization or faster hardware; this preset does not promise 60 fps.
+
 ## Publication policy
 
 Publish only the reviewed setup files and runtime patch. Do not publish disc images, extracted
