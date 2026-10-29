@@ -37,6 +37,20 @@ automatically discovers `lib/` and `lib64/` there. This machine was tested with
 SDL2 2.32.10 and Intel UHD Graphics 620 on Vulkan. The sandbox's software Vulkan
 renderer is much slower; hardware GPU access is needed for a useful play test.
 
+## Skip startup movies
+
+```sh
+bash scripts/play.sh --nointro --performance
+bash scripts/play.sh --nointro --widescreen --performance
+```
+
+`--nointro` skips the startup movies and reaches **Press Start** without sending
+controller input. No rebuild is needed. It supports the verified US executable
+and generates private boot-time patches under `.local/nointro/`; your disc image
+and extracted executable stay unchanged. Reward and making-of movie paths are
+not targeted. The option is ignored when launching with `--load-state` or
+`--replay`, which restore their own state.
+
 ## Widescreen 16:9
 
 Build the separate widescreen profile from your own US disc image:

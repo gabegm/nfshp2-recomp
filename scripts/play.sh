@@ -3,14 +3,20 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 performance=0
 wide=0
+nointro=0
+resume=0
 runner_args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --performance) performance=1; shift ;;
     --widescreen) wide=1; shift ;;
+    --nointro) nointro=1; shift ;;
     --) shift; runner_args+=("$@"); break ;;
     *) runner_args+=("$1"); shift ;;
   esac
+done
+for arg in "${runner_args[@]}"; do
+  case "$arg" in --load-state|--replay) resume=1 ;; esac
 done
 if [ "$performance" = 1 ]; then
   # On the tested Intel laptop, queue overhead outweighs the extra VU thread,
@@ -39,6 +45,10 @@ program=$(sed -n 's/^BOOT2 *= *//p' "games/$game/disc/SYSTEM.CNF" | tr -d '\r')
 program=${program#*\\}
 program=${program%;*}
 elf="games/$game/disc/$program"
+if [ "$nointro" = 1 ] && [ "$resume" = 0 ]; then
+  intro_patch=$(python3 "$root/scripts/nointro.py" "$elf")
+  extra+=(--patches "$intro_patch")
+fi
 if [ "$wide" = 1 ]; then elf="games/$game/patched/$program"; fi
 exec "build/native-$game/ps2run" "$elf" \
   --disc "games/$game/disc.iso" --window --memcard games/nfshp2/player.ps2 "${extra[@]}" "${runner_args[@]}"

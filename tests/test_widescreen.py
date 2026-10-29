@@ -88,6 +88,11 @@ class LauncherTests(unittest.TestCase):
         scripts = self.root / 'scripts'
         scripts.mkdir()
         shutil.copy2(Path(__file__).resolve().parents[1] / 'scripts/play.sh', scripts / 'play.sh')
+        (scripts / 'nointro.py').write_text(
+            'from pathlib import Path\nimport sys\n'
+            'root=Path(__file__).resolve().parents[1]\n'
+            '(root/"nointro-source.txt").write_text(sys.argv[1])\n'
+            'print(root/".local/intro-patch.txt")\n')
         upstream = self.root / '.local/ps2-native-recomp'
         for game in ('nfshp2', 'nfshp2-wide'):
             disc = upstream / 'games' / game / 'disc'
@@ -132,6 +137,29 @@ class LauncherTests(unittest.TestCase):
         result = self.launch('--widescreen')
         self.assertEqual(result.returncode, 1)
         self.assertIn('Build widescreen first', result.stderr)
+
+    def test_nointro_combines_with_each_profile_without_controller_presses(self):
+        for flags, game in [(('--nointro', '--performance'), 'nfshp2'),
+                            (('--performance', '--widescreen', '--nointro'), 'nfshp2-wide')]:
+            with self.subTest(flags=flags):
+                result = self.launch(*flags)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                args = json.loads(result.stdout)['args']
+                self.assertNotIn('--nointro', args)
+                self.assertNotIn('--press', args)
+                self.assertIn(str(self.root / '.local/intro-patch.txt'), args)
+                self.assertEqual((self.root / 'nointro-source.txt').read_text(),
+                                 f'games/{game}/disc/BOOT.ELF')
+                if game.endswith('-wide'):
+                    self.assertIn('games/nfshp2-wide/patches.txt', args)
+
+    def test_nointro_leaves_state_and_replay_resumes_alone(self):
+        for option in ('--load-state', '--replay'):
+            with self.subTest(option=option):
+                result = self.launch('--nointro', '--', option, 'synthetic-save')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn('--patches', json.loads(result.stdout)['args'])
+                self.assertFalse((self.root / 'nointro-source.txt').exists())
 
 
 if __name__ == '__main__':

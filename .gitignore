@@ -11,9 +11,11 @@
 !/scripts/check-public-files.py
 !/scripts/play.sh
 !/scripts/fetch-widescreen.py
+!/scripts/nointro.py
 !/tests/
 /tests/*
 !/tests/test_widescreen.py
+!/tests/test_nointro.py
 !/patches/
 /patches/*
 !/patches/runtime-compatibility.patch

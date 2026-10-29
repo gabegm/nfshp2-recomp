@@ -12,6 +12,8 @@ allowed = {
     'scripts/fetch-widescreen.py',
     'OPTIMIZATION.md',
     'tests/test_widescreen.py',
+    'scripts/nointro.py',
+    'tests/test_nointro.py',
 }
 result = subprocess.run(
     ['git', 'ls-files', '-z'], check=True, stdout=subprocess.PIPE,
