@@ -1,0 +1,30 @@
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 4d7768b..5780b38 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -67,2 +67,7 @@ std::uint32_t field_base(std::uint32_t field) { return g_copy_words + (field & 1
+ bool g_timestamps = false;
++double g_timestamp_period = 1.0;
++
++std::uint64_t timestamp_ns(std::uint64_t ticks) {
++    return static_cast<std::uint64_t>(static_cast<double>(ticks) * g_timestamp_period);
++}
+ WGPUQuerySet g_queries = nullptr;
+@@ -934,3 +939,3 @@ void profile_submit() {
+             std::fprintf(g_profile_out, "%llu %u %s %llu %u %u", static_cast<unsigned long long>(frame_count()), i, kEntryPoints[g_commands[i].pipeline],
+-                         static_cast<unsigned long long>(t[i * 2 + 1] > t[i * 2] ? t[i * 2 + 1] - t[i * 2] : 0), g_commands[i].x, g_commands[i].y);
++                         static_cast<unsigned long long>(t[i * 2 + 1] > t[i * 2] ? timestamp_ns(t[i * 2 + 1] - t[i * 2]) : 0), g_commands[i].x, g_commands[i].y);
+             if (info < g_command_info.size() && g_command_info[info].index == i)
+@@ -985,3 +990,3 @@ void submit(WGPUTextureView present_view = nullptr) {
+             if (t[1] > t[0]) {
+-                g_measured_ns += t[1] - t[0];
++                g_measured_ns += timestamp_ns(t[1] - t[0]);
+                 ++g_measured;
+@@ -1661,1 +1666,7 @@ bool init(Mode m) {
+     g_queue = wgpuDeviceGetQueue(g_device);
++#ifndef __EMSCRIPTEN__
++    // wgpu-native returns raw timestamp ticks unless normalization is enabled.
++    g_timestamp_period = wgpuQueueGetTimestampPeriod(g_queue);
++#else
++    g_timestamp_period = 1.0;
++#endif

@@ -45,27 +45,50 @@ For the tested Intel i5-8350U / UHD 620 laptop, try:
 bash scripts/play.sh --performance
 ```
 
-This disables the separate vector-unit thread and texture predecode, keeping
-the render thread enabled. On a short Coastal Parklands race checkpoint this
-improved the window's frame counter from 28–30 to 35–36 fps on battery power.
-These are emulated video frames; the game may draw a new picture every other
-frame. This is still below full speed, and other PCs or scenes may differ.
-Omit `--performance` to restore upstream defaults.
+This disables the separate vector-unit thread and texture predecode, keeps
+internal resolution at 1x, and uses the simpler Crisp display filter instead
+of cubic sharpening and edge smoothing. The game's rendering resolution,
+PS2 timing and arithmetic are unchanged; the final enlarged picture has fewer
+visual enhancements.
 
-The main menu was also measured: about 47 fps with defaults and 48 fps with
-the preset. The preset therefore does not fix menu slowdown. The tested US
-disc requires 60 video frames per second for full speed: 47 fps means about
-78% speed, which also slows the audio. Turning off audio stretching produces
-gaps rather than restoring game speed. Boot and gameplay support should not
-be read as a claim of full-speed performance on this laptop.
+Short repeated checkpoint tests on battery power gave:
+
+| Scene | Default | Updated performance preset |
+|---|---:|---:|
+| Main menu | 45 fps | 50–52 fps |
+| Coastal Parklands race | 29 fps | 40–41 fps |
+
+The previous preset reached about 35 fps in that race; switching to the cheaper
+display filter provided the additional gain. Results vary with the scene,
+power limits and background load. These are emulated video frames; the game
+may draw a new picture every other frame. The tested US disc needs 60 video
+frames per second for full speed, so this is still slow motion with stretched
+audio. Disabling audio stretching produces gaps rather than restoring speed.
+
+Omit `--performance` to use the normal settings. To keep the runtime tuning but
+restore the more expensive display filter:
+
+```sh
+PS2_LOOK=sharp_edges bash scripts/play.sh --performance
+```
 
 Plug into mains power and select the desktop's Performance power profile when
 available. Keep `PS2_SCALE=1`; higher internal resolutions add graphics work.
-The build already uses Release optimization and AVX2 when supported. In the
-profiled scene all VU1 calls were compiled, so further interpreter warmup did
-not address the sustained slowdown. Graphics command processing and driver
-overhead were substantial costs. Reaching full speed may require renderer
-optimization or faster hardware; this preset does not promise 60 fps.
+The build already uses Release optimization and AVX2 when supported. CPU
+specialization, CPU-specific compiler flags, aggressive inlining and ThinLTO
+were tested but did not produce a repeatable menu improvement, so those
+experiments are not enabled or required by the build.
+
+The presentation patch fixes wgpu-native timestamp-unit conversion in GPU
+profiling. The GPU meter covers compute passes; it excludes the final display
+filter, whose cost was confirmed by comparing frame rates directly. A low GPU
+reading therefore does not establish that display filtering is cheap.
+
+The runtime changes were checked against the baseline using identical local
+menu/race checkpoints: short-run memory dumps, audio samples and raw rendered
+frames matched byte for byte. The display filter intentionally changes the
+window's final appearance. Full-speed play and full-game compatibility remain
+unverified.
 
 ## Publication policy
 

@@ -8,6 +8,7 @@ allowed = {
     'scripts/check-public-files.py',
     'scripts/play.sh', 'patches/runtime-compatibility.patch',
     'patches/LICENSE.upstream',
+    'patches/presentation-performance.patch',
 }
 result = subprocess.run(
     ['git', 'ls-files', '-z'], check=True, stdout=subprocess.PIPE,

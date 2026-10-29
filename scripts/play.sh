@@ -8,6 +8,8 @@ if [ "${1:-}" = "--performance" ]; then
   export PS2_NO_VU_THREAD=1
   export PS2_DECODE="${PS2_DECODE:-0}"
   export PS2_SCALE="${PS2_SCALE:-1}"
+  # The default cubic sharpening filter costs substantial time on the UHD 620.
+  export PS2_LOOK="${PS2_LOOK:-crisp}"
 fi
 cd "$root/.local/ps2-native-recomp"
 export LD_LIBRARY_PATH="$root/.local/deps/lib64:$root/.local/deps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"

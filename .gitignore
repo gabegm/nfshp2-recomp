@@ -11,4 +11,5 @@
 !/patches/
 /patches/*
 !/patches/runtime-compatibility.patch
+!/patches/presentation-performance.patch
 !/patches/LICENSE.upstream

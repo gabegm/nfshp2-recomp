@@ -35,13 +35,15 @@ if [ "$(git -C "$upstream" rev-parse HEAD)" != "$revision" ]; then
   echo "Expected upstream revision $revision; inspect the local checkout before proceeding." >&2
   exit 1
 fi
-patch="$root/patches/runtime-compatibility.patch"
-if git -C "$upstream" apply --reverse --check "$patch" 2>/dev/null; then
-  : # Compatibility changes already installed.
-else
-  git -C "$upstream" apply --check "$patch"
-  git -C "$upstream" apply "$patch"
-fi
+for patch_name in runtime-compatibility presentation-performance; do
+  patch="$root/patches/$patch_name.patch"
+  if git -C "$upstream" apply --reverse --check "$patch" 2>/dev/null; then
+    : # Changes already installed.
+  else
+    git -C "$upstream" apply --check "$patch"
+    git -C "$upstream" apply "$patch"
+  fi
+done
 # Upstream reuses a game's previous image. Refuse an accidental disc switch.
 if [ -e "$upstream/games/nfshp2/disc.iso" ] && ! [ "$image" -ef "$upstream/games/nfshp2/disc.iso" ]; then
   echo 'A different image is already configured; use a separate checkout for another disc.' >&2
