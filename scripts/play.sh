@@ -24,6 +24,8 @@ if [ "$performance" = 1 ]; then
   export PS2_NO_VU_THREAD=1
   export PS2_DECODE="${PS2_DECODE:-0}"
   export PS2_SCALE="${PS2_SCALE:-1}"
+  # Smaller raster tiles reduced GPU time in the measured UHD 620 race.
+  export PS2_TILE="${PS2_TILE:-4}"
   # The default cubic sharpening filter costs substantial time on the UHD 620.
   export PS2_LOOK="${PS2_LOOK:-crisp}"
 fi

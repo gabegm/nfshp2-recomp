@@ -92,7 +92,7 @@ bash scripts/play.sh --performance
 ```
 
 This disables the separate vector-unit thread and texture predecode, keeps
-internal resolution at 1x, and uses the simpler Crisp display filter instead
+internal resolution at 1x, selects 4x4 raster tiles, and uses the simpler Crisp display filter instead
 of cubic sharpening and edge smoothing. The game's rendering resolution,
 PS2 timing and arithmetic are unchanged; the final enlarged picture has fewer
 visual enhancements.
@@ -129,6 +129,15 @@ The presentation patch fixes wgpu-native timestamp-unit conversion in GPU
 profiling. The GPU meter covers compute passes; it excludes the final display
 filter, whose cost was confirmed by comparing frame rates directly. A low GPU
 reading therefore does not establish that display filtering is cheap.
+
+Further AC-powered profiling found the PS2 compute rasterizer to be the main
+graphics cost. Alternating race tests with Crisp improved from 38.6–38.9 fps
+with 8x8 tiles to 41.2–42.0 fps with 4x4 tiles; menu results were about 49–50 fps
+with either size. The preset now defaults to 4x4. Use `PS2_TILE=8` to compare on
+your own GPU. This still does not reach full speed.
+
+Optional GPU tracing, including the final display filter, is documented in
+[OPTIMIZATION.md](OPTIMIZATION.md#graphics-profile-on-ac-power).
 
 The runtime changes were checked against the baseline using identical local
 menu/race checkpoints: short-run memory dumps, audio samples and raw rendered

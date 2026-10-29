@@ -9,6 +9,7 @@ allowed = {
     'scripts/play.sh', 'patches/runtime-compatibility.patch',
     'patches/LICENSE.upstream',
     'patches/presentation-performance.patch',
+    'patches/graphics-profiling.patch',
     'scripts/fetch-widescreen.py',
     'OPTIMIZATION.md',
     'tests/test_widescreen.py',

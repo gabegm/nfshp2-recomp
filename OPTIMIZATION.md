@@ -78,6 +78,84 @@ Do not improve a benchmark by changing guest clock rates, skipping required
 work, muting audio, or counting repeated presentations as new game frames.
 Widescreen and 60-fps game patches change the workload and need separate tests.
 
+## Graphics profile on AC power
+
+Measured on 2026-10-29 with the i5-8350U/UHD 620, Vulkan, AC connected,
+CPU energy preference `performance`, 1x internal resolution, Crisp filtering,
+texture predecode off and the separate VU thread disabled. The standard 4:3
+race checkpoint starts at frame 3000; holding Cross through frame 3240 gives
+201 logged frames after discarding the initial warm-up. The menu checkpoint
+starts at 1800 and ends at 2160, with 301 frames retained. These are short,
+scene-specific measurements; thermal state and desktop load can affect them.
+
+| Race configuration | Video frames/s |
+|---|---:|
+| Default 8x8 raster tiles, first/repeated runs | 38.89 / 38.64 |
+| 4x4 raster tiles, intervening repeated runs | 41.95 / 41.21 |
+
+Menu results were 49.29 fps with 8x8 tiles and 49.90 with 4x4, too close to
+claim a meaningful menu improvement. A preliminary 16x16 race test was slower
+(31.39 fps). Immediate presentation did not show a substantial improvement
+over Mailbox. The performance preset now selects 4x4 tiles; `PS2_TILE=8` restores
+the upstream size. No geometry, guest timing or required graphics work is skipped.
+
+Separate instrumented runs showed:
+
+- The menu's sampled compute pass averaged about 19.5 ms. The final Crisp
+  display render pass averaged about 0.55 ms in both scenes.
+- In the race, processing GIF messages on the rendering thread averaged
+  8.6 ms per picture with 8x8 tiles. Acquiring a screen buffer averaged 14.6 ms;
+  submission averaged 2.5 ms and the present call about 0.03 ms. These are
+  CPU wall times; the buffer wait can expose earlier GPU work or compositor
+  delays and is not an independent shader duration.
+- With 4x4 tiles, race GIF processing rose to 10.5 ms, while buffer acquisition
+  fell to 10.2 ms. This trades more CPU tile setup for less GPU work.
+- Detailed dispatch traces attributed about 72% of measured race compute-pass
+  time and 92% of menu compute-pass time to `raster`. The remaining race work
+  was mostly uploads and palette loads. This profiler splits dispatches into
+  separate passes and waits for results, so these shares identify candidates;
+  they are not a breakdown of ordinary frame time.
+
+This points to raster shader paths, screen-filling menu sprites, texture
+sampling and overdraw as the next investigation. Race upload/palette command
+overhead is a secondary target. Replacing the final display filter again or
+recompiling already compiled VU programs is a lower priority with this preset.
+The UHD 620 limits the current renderer, but these traces do not establish a
+hardware-only limit or promise that further changes can reach 60 fps.
+
+The graphics profiling patch adds optional asynchronous compute/display
+timestamp samples and fixes the detailed profiler to include compute commands
+submitted with presentation. Previously that omission produced an empty menu
+trace. After rebuilding, collect a local trace with:
+
+```sh
+mkdir -p .local/graphics-profile
+PS2_PRESENT_LOG=1 PS2_GPU_TIMING="$PWD/.local/graphics-profile/session.tsv" \
+  bash scripts/play.sh --performance --nointro
+```
+
+`PS2_GPU_TIMING` writes `frame presentation compute_ns blit_ns`. Rows are
+samples of submissions, not complete frame totals. Only rows with
+`presentation=1` measure the final display render pass; zero in another row
+means that pass was absent. A pending query can cause submissions to go
+unsampled, and the final pending sample may be absent at shutdown. Timestamp
+query support is required. Tracing is disabled unless requested.
+
+For detailed dispatch analysis, set
+`PS2_GPU_PROFILE="1800,1803,$PWD/.local/graphics-profile/dispatches.tsv"`, choosing
+an interval in the scene of interest and an output path without spaces. Keep
+these runs separate from FPS comparisons. Do not combine the detailed profiler
+with asynchronous timing when interpreting durations, since the detailed mode
+changes pass boundaries. `PS2_PRESENT_LOG=1` logs CPU presentation stages;
+`PS2_HITCH_LOG=1000` together with `PS2_HITCH_PICTURES=/absolute/private/path.tsv`
+also records per-picture message processing and buffer waits.
+
+Short deterministic checks compared menu, race and widescreen race pictures,
+guest memory and audio with 8x8 versus 4x4 tiles and with profiling enabled.
+All sampled outputs matched byte for byte. Those checks cover the sampled
+scenes, not every track or effect. Captures, checkpoints and detailed traces
+remain ignored under `.local/`.
+
 ## Reuse and repository policy
 
 PS2 Web Recomp and this runtime use MIT licensing; PS2Recomp and the cited God

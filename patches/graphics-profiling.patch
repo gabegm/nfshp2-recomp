@@ -1,0 +1,126 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -73,6 +73,12 @@
+ WGPUQuerySet g_queries = nullptr;
+ WGPUBuffer g_query_resolve = nullptr, g_query_read = nullptr;
+ bool g_query_pending = false, g_query_ready = false;
++// Optional asynchronous samples: the final display filter is a render pass,
++// separate from the compute passes included in the ordinary GPU meter.
++std::FILE *g_timing_out = nullptr;
++bool g_query_present = false;
++std::uint64_t g_query_frame = 0;
++std::size_t g_query_bytes = 16;
+ std::uint64_t g_measured_ns = 0, g_measured = 0, g_total_passes = 0;
+ WGPUDevice g_device = nullptr;
+ WGPUQueue g_queue = nullptr;
+@@ -967,9 +973,11 @@
+ void submit(WGPUTextureView present_view = nullptr) {
+     if (g_commands.empty() && !present_view) return;
+     if (g_bench.capturing) bench_capture();
+-    if (g_profile_out && !present_view && g_timestamps && frame_count() >= g_profile_from && frame_count() < g_profile_to) {
++    if (g_profile_out && g_timestamps && frame_count() >= g_profile_from && frame_count() < g_profile_to) {
+         profile_submit();
+-        return;
++        // Presentation submits can contain the entire menu workload. Profile
++        // their compute work too, then retain the final display render pass.
++        if (!present_view) return;
+     }
+     ensure_capacity();
+     if (ps2::hitch::on()) {
+@@ -983,7 +991,7 @@
+     wgpuQueueWriteBuffer(g_queue, g_data, 0, g_arena.data(), g_arena.size() * 4);
+     wgpuQueueWriteBuffer(g_queue, g_params, 0, g_param_records.data(), g_param_records.size() * kParamStride);
+     if (g_query_ready) {
+-        const void *mapped = wgpuBufferGetConstMappedRange(g_query_read, 0, 16);
++        const void *mapped = wgpuBufferGetConstMappedRange(g_query_read, 0, g_query_bytes);
+         if (mapped) {
+             std::uint64_t t[2];
+             std::memcpy(t, mapped, sizeof t);
+@@ -991,6 +999,15 @@
+                 g_measured_ns += timestamp_ns(t[1] - t[0]);
+                 ++g_measured;
+             }
++            if (g_timing_out) {
++                std::uint64_t b[2] = {};
++                if (g_query_present) std::memcpy(b, static_cast<const unsigned char *>(mapped) + 16, sizeof b);
++                const auto compute = t[1] > t[0] ? timestamp_ns(t[1] - t[0]) : 0;
++                const auto blit = b[1] > b[0] ? timestamp_ns(b[1] - b[0]) : 0;
++                std::fprintf(g_timing_out, "%llu %u %llu %llu\n", static_cast<unsigned long long>(g_query_frame), g_query_present ? 1u : 0u,
++                             static_cast<unsigned long long>(compute), static_cast<unsigned long long>(blit));
++                std::fflush(g_timing_out);
++            }
+         }
+         wgpuBufferUnmap(g_query_read);
+         g_query_ready = g_query_pending = false;
+@@ -1027,7 +1044,7 @@
+     }
+     wgpuComputePassEncoderEnd(pass);
+     wgpuComputePassEncoderRelease(pass);
+-    if (measure) {
++    if (measure && !g_timing_out) {
+         wgpuCommandEncoderResolveQuerySet(enc, g_queries, 0, 2, g_query_resolve, 0);
+         wgpuCommandEncoderCopyBufferToBuffer(enc, g_query_resolve, 0, g_query_read, 0, 16);
+     }
+@@ -1040,6 +1057,13 @@
+         WGPURenderPassDescriptor rd = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+         rd.colorAttachmentCount = 1;
+         rd.colorAttachments = &color;
++        WGPUPassTimestampWrites blit_writes = WGPU_PASS_TIMESTAMP_WRITES_INIT;
++        if (measure && g_timing_out) {
++            blit_writes.querySet = g_queries;
++            blit_writes.beginningOfPassWriteIndex = 2;
++            blit_writes.endOfPassWriteIndex = 3;
++            rd.timestampWrites = &blit_writes;
++        }
+         WGPURenderPassEncoder rp = wgpuCommandEncoderBeginRenderPass(enc, &rd);
+         const float w = static_cast<float>(g_surface_width), h = static_cast<float>(g_surface_height);
+         const float aspect = g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+@@ -1051,6 +1075,11 @@
+         wgpuRenderPassEncoderEnd(rp);
+         wgpuRenderPassEncoderRelease(rp);
+     }
++    if (measure && g_timing_out) {
++        const std::uint32_t count = present_view ? 4u : 2u;
++        wgpuCommandEncoderResolveQuerySet(enc, g_queries, 0, count, g_query_resolve, 0);
++        wgpuCommandEncoderCopyBufferToBuffer(enc, g_query_resolve, 0, g_query_read, 0, count * 8);
++    }
+     WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
+     wgpuQueueSubmit(g_queue, 1, &cmd);
+     wgpuCommandBufferRelease(cmd);
+@@ -1063,7 +1092,10 @@
+             if (status == WGPUMapAsyncStatus_Success) g_query_ready = true;
+             else g_query_pending = false;
+         };
+-        wgpuBufferMapAsync(g_query_read, WGPUMapMode_Read, 0, 16, cb);
++        g_query_present = g_timing_out && present_view;
++        g_query_frame = frame_count();
++        g_query_bytes = g_query_present ? 32 : 16;
++        wgpuBufferMapAsync(g_query_read, WGPUMapMode_Read, 0, g_query_bytes, cb);
+     }
+ #ifdef __EMSCRIPTEN__
+     wgpuInstanceProcessEvents(g_instance);
+@@ -1707,13 +1739,21 @@
+     if (const char *decode = std::getenv("PS2_DECODE")) g_decode = std::atoi(decode) != 0;
+     g_cache_copy.assign(kCacheWords, 0);
+     g_readback = make_buffer(static_cast<std::uint64_t>(g_copy_words) * 4, WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst);
++    if (const std::string path = os::env("PS2_GPU_TIMING"); !path.empty()) {
++        if (g_timestamps) {
++            g_timing_out = os::open(path.c_str(), "w");
++            if (g_timing_out) std::fprintf(g_timing_out, "frame presentation compute_ns blit_ns\n");
++            else std::fprintf(stderr, "[gpu] could not open PS2_GPU_TIMING output\n");
++        } else std::fprintf(stderr, "[gpu] PS2_GPU_TIMING needs timestamp queries\n");
++    }
+     if (g_timestamps) {
+         WGPUQuerySetDescriptor qd = WGPU_QUERY_SET_DESCRIPTOR_INIT;
+         qd.type = WGPUQueryType_Timestamp;
+-        qd.count = 2;
++        qd.count = g_timing_out ? 4 : 2;
++        const std::uint64_t bytes = g_timing_out ? 32 : 16;
+         g_queries = wgpuDeviceCreateQuerySet(g_device, &qd);
+-        g_query_resolve = make_buffer(16, WGPUBufferUsage_QueryResolve | WGPUBufferUsage_CopySrc);
+-        g_query_read = make_buffer(16, WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst);
++        g_query_resolve = make_buffer(bytes, WGPUBufferUsage_QueryResolve | WGPUBufferUsage_CopySrc);
++        g_query_read = make_buffer(bytes, WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst);
+     }
+ 
+     WGPUBindGroupLayoutEntry le[8] = {};
