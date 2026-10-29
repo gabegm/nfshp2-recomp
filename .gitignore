@@ -1,6 +1,7 @@
 # Only publish the hand-written setup. All game-derived content stays local.
 /*
 !/.gitignore
+!/.gitattributes
 !/README.md
 !/LICENSE
 !/scripts/

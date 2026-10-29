@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 allowed = {
-    '.gitignore', 'README.md', 'LICENSE', 'scripts/build.sh',
+    '.gitignore', '.gitattributes', 'README.md', 'LICENSE', 'scripts/build.sh',
     'scripts/check-public-files.py',
     'scripts/play.sh', 'patches/runtime-compatibility.patch',
     'patches/LICENSE.upstream',
