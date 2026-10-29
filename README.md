@@ -52,6 +52,13 @@ These are emulated video frames; the game may draw a new picture every other
 frame. This is still below full speed, and other PCs or scenes may differ.
 Omit `--performance` to restore upstream defaults.
 
+The main menu was also measured: about 47 fps with defaults and 48 fps with
+the preset. The preset therefore does not fix menu slowdown. The tested US
+disc requires 60 video frames per second for full speed: 47 fps means about
+78% speed, which also slows the audio. Turning off audio stretching produces
+gaps rather than restoring game speed. Boot and gameplay support should not
+be read as a claim of full-speed performance on this laptop.
+
 Plug into mains power and select the desktop's Performance power profile when
 available. Keep `PS2_SCALE=1`; higher internal resolutions add graphics work.
 The build already uses Release optimization and AVX2 when supported. In the
