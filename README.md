@@ -37,6 +37,38 @@ automatically discovers `lib/` and `lib64/` there. This machine was tested with
 SDL2 2.32.10 and Intel UHD Graphics 620 on Vulkan. The sandbox's software Vulkan
 renderer is much slower; hardware GPU access is needed for a useful play test.
 
+## Widescreen 16:9
+
+Build the separate widescreen profile from your own US disc image:
+
+```sh
+bash scripts/build.sh "/absolute/path/to/Need for Speed Hot Pursuit 2.iso" --widescreen --no-explore
+bash scripts/play.sh --widescreen --performance
+```
+
+This downloads the [PCSX2 community patch](https://github.com/PCSX2/pcsx2_patches/blob/8afa626253d5fdcb23e660314779c91e6b8cbb8a/patches/SLUS-20362_1D2818AF.pnach)
+privately and enables the projection correction by nemesis2000 and HUD correction
+by Aero_. The patch revision and download checksum are pinned. The full game
+executable's SHA-256 and US serial are checked: the PAL edition can share the
+same PCSX2 CRC, so CRC alone is not enough.
+
+Code patches are applied before translation. The launcher uses the matching
+patched executable, translated binary, runtime patch list and 16:9 display.
+Only the widescreen and HUD sections are enabled. The 60-fps hack and controller
+changes in the downloaded file are left disabled.
+
+The normal 4:3 build stays available with `bash scripts/play.sh --performance`.
+Both profiles use the same in-game memory card path, while widescreen quick
+saves are stored separately. Start widescreen from a cold boot or a widescreen
+quick save; a 4:3 quick save contains previously initialized projection state.
+The first widescreen build takes several minutes. It uses its own build folders
+and reuses vector programs already observed in the normal build.
+
+Widescreen increases the visible area; it is a visual feature, not a speed fix.
+Cold boot, menus and an early race are the initial validation scope. Other
+tracks, movies and a full playthrough remain unverified. Downloaded community
+patches, patched game files and generated binaries stay in `.local/`.
+
 ## Performance
 
 For the tested Intel i5-8350U / UHD 620 laptop, try:
@@ -89,6 +121,10 @@ menu/race checkpoints: short-run memory dumps, audio samples and raw rendered
 frames matched byte for byte. The display filter intentionally changes the
 window's final appearance. Full-speed play and full-game compatibility remain
 unverified.
+
+For optimization ideas from Ace Combat 5, God of War and other PS2 projects,
+see [OPTIMIZATION.md](OPTIMIZATION.md). These describe candidate changes;
+their performance results do not establish an NFS speedup.
 
 ## Publication policy
 

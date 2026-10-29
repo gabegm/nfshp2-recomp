@@ -9,6 +9,9 @@ allowed = {
     'scripts/play.sh', 'patches/runtime-compatibility.patch',
     'patches/LICENSE.upstream',
     'patches/presentation-performance.patch',
+    'scripts/fetch-widescreen.py',
+    'OPTIMIZATION.md',
+    'tests/test_widescreen.py',
 }
 result = subprocess.run(
     ['git', 'ls-files', '-z'], check=True, stdout=subprocess.PIPE,

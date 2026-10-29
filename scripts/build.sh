@@ -13,6 +13,17 @@ case "${image,,}" in
   *) echo 'Provide an unpacked .iso disc image.' >&2; exit 2 ;;
 esac
 shift
+game=nfshp2
+wide=0
+port_args=()
+for arg in "$@"; do
+  if [ "$arg" = "--widescreen" ]; then
+    wide=1
+    game=nfshp2-wide
+  else
+    port_args+=("$arg")
+  fi
+done
 if [ -d "$root/.local/deps" ]; then
   export CMAKE_PREFIX_PATH="$root/.local/deps${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
   export PKG_CONFIG_PATH="$root/.local/deps/lib64/pkgconfig:$root/.local/deps/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
@@ -44,8 +55,18 @@ for patch_name in runtime-compatibility presentation-performance; do
     git -C "$upstream" apply "$patch"
   fi
 done
+if [ "$wide" = 1 ]; then
+  wide_patch=$(python3 "$root/scripts/fetch-widescreen.py" "$image")
+  port_args+=(--widescreen --pnach "$wide_patch" --pnach-section 'Widescreen 16:9' --pnach-section 'HUD fixed for widescreen')
+  # Reuse already observed vector programs; all remain private game data.
+  mkdir -p "$upstream/games/$game/vu1"
+  for program in "$upstream/games/nfshp2/vu1/"*.bin; do
+    [ -f "$program" ] || continue
+    [ -e "$upstream/games/$game/vu1/$(basename "$program")" ] || cp "$program" "$upstream/games/$game/vu1/"
+  done
+fi
 # Upstream reuses a game's previous image. Refuse an accidental disc switch.
-if [ -e "$upstream/games/nfshp2/disc.iso" ] && ! [ "$image" -ef "$upstream/games/nfshp2/disc.iso" ]; then
+if [ -e "$upstream/games/$game/disc.iso" ] && ! [ "$image" -ef "$upstream/games/$game/disc.iso" ]; then
   echo 'A different image is already configured; use a separate checkout for another disc.' >&2
   exit 1
 fi
@@ -54,4 +75,7 @@ cd "$upstream"
 export PS2_JOBS="${PS2_JOBS:-4}"
 export CCACHE_DIR="$root/.local/ccache"
 bash scripts/setup.sh --native-only
-bash scripts/port.sh nfshp2 "$image" --native-only "$@"
+bash scripts/port.sh "$game" "$image" --native-only "${port_args[@]}"
+if [ "$wide" = 1 ]; then
+  echo "From the setup directory, play with: bash scripts/play.sh --widescreen --performance"
+fi
