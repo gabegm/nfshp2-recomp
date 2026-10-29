@@ -14,3 +14,6 @@
 !/patches/runtime-compatibility.patch
 !/patches/presentation-performance.patch
 !/patches/LICENSE.upstream
+
+# Never track disc images, including mixed-case extensions, in any directory.
+*.[iI][sS][oO]
