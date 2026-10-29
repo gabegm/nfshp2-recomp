@@ -1,0 +1,14 @@
+# Only publish the hand-written setup. All game-derived content stays local.
+/*
+!/.gitignore
+!/README.md
+!/LICENSE
+!/scripts/
+/scripts/*
+!/scripts/build.sh
+!/scripts/check-public-files.py
+!/scripts/play.sh
+!/patches/
+/patches/*
+!/patches/runtime-compatibility.patch
+!/patches/LICENSE.upstream

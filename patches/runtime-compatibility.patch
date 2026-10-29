@@ -1,0 +1,76 @@
+diff --git a/runtime/src/iop/cdvdfsv.cpp b/runtime/src/iop/cdvdfsv.cpp
+index 02e73c4..42f2e25 100644
+--- a/runtime/src/iop/cdvdfsv.cpp
++++ b/runtime/src/iop/cdvdfsv.cpp
+@@ -49,4 +49,31 @@ void install_cdvdfsv() {
+     });
+     register_job(kJobFsvComplete, [](const Job &) { sif::complete_call(0x80000595u); });
++    // Read-chain packets contain 64 sector/count/destination triples followed
++    // by a sentinel and the read mode/progress pointer. Destination bit zero
++    // selects IOP memory; otherwise the transfer targets EE memory.
++    register_job(kJobFsvChain, [](const Job &j) {
++        const auto entry = j.a + j.b * 12u;
++        const auto sector = ee32(entry), count = ee32(entry + 4), dst = ee32(entry + 8);
++        if (j.b >= 64 || sector == 0xFFFFFFFFu || count == 0xFFFFFFFFu || dst == 0xFFFFFFFFu) {
++            sif::complete_call(0x80000595u);
++            return;
++        }
++        if (!disc::ready(sector, count)) {
++            schedule(now() + usec_to_cycles(1000), j);
++            return;
++        }
++        if (g_trace_hle) std::fprintf(stderr, "[cdvdfsv] chain %u sector %u count %u to 0x%08X\n", j.b, sector, count, dst);
++        if (dst & 1u) {
++            std::vector<std::uint8_t> data(static_cast<std::size_t>(count) * disc::kSector);
++            disc::read(sector, count, data.data());
++            for (std::size_t i = 0; i < data.size(); ++i) write8((dst & ~1u) + static_cast<std::uint32_t>(i), data[i]);
++        } else {
++            read_to_ee(sector, count, dst);
++        }
++        const auto bytes = j.c + count * disc::kSector;
++        const auto progress = ee32(j.a + 65u * 12u + 4u);
++        if (progress) set_ee32(progress, bytes);
++        schedule(now() + delay(count), Job{kJobFsvChain, j.a, j.b + 1u, bytes});
++    });
+     register_job(kJobFsvIopRead, [](const Job &j) {
+         if (!disc::ready(j.a, j.b)) {
+@@ -99,5 +126,5 @@ void install_cdvdfsv() {
+         return true;
+     });
+-    sif::register_hle_server(0x80000595u, [](std::uint32_t method, std::uint32_t args, std::uint32_t, std::uint32_t ret, std::uint32_t ret_size) {
++    sif::register_hle_server(0x80000595u, [](std::uint32_t method, std::uint32_t args, std::uint32_t size, std::uint32_t ret, std::uint32_t ret_size) {
+         const std::uint32_t sector = ee32(args), count = ee32(args + 4), dst = ee32(args + 8);
+         if (g_trace_hle) std::fprintf(stderr, "[cdvdfsv] N 0x%X sector %u count %u to 0x%08X\n", method, sector, count, dst);
+@@ -139,4 +166,8 @@ void install_cdvdfsv() {
+             return false;
+         case 0x0E: set_ee32(ret, 2); return true;
++        case 0x0F:
++            if (size < 788u) return true;
++            schedule(now() + delay(0), Job{kJobFsvChain, args});
++            return false;
+         default:
+             std::fprintf(stderr, "[cdvdfsv] N command 0x%X\n", method);
+diff --git a/runtime/src/iop/kernel.hpp b/runtime/src/iop/kernel.hpp
+index 396e6f8..bd92c46 100644
+--- a/runtime/src/iop/kernel.hpp
++++ b/runtime/src/iop/kernel.hpp
+@@ -66,4 +66,5 @@ enum JobKind : std::uint32_t {
+     kJobSifDmaCallback,
+     kJobSifReply,
++    kJobFsvChain,
+     kJobCount
+ };
+diff --git a/runtime/src/iop/sif.cpp b/runtime/src/iop/sif.cpp
+index d071590..767a95e 100644
+--- a/runtime/src/iop/sif.cpp
++++ b/runtime/src/iop/sif.cpp
+@@ -91,5 +91,8 @@ template <typename T>
+ T ee_read(std::uint32_t a) {
+     T v;
+-    std::memcpy(&v, g_ram + (a & (kRamSize - 1)), sizeof v);
++    const auto *source = (a >> 14) == (kScratchpadBase >> 14)
++        ? g_spr + (a & (kScratchpadSize - 1))
++        : g_ram + (a & (kRamSize - 1));
++    std::memcpy(&v, source, sizeof v);
+     return v;
+ }
