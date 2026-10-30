@@ -1,0 +1,72 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -98,5 +98,7 @@
+     {0u, 0xEA6Bu}, {0u, 0xEA43u}, {0u, 0x8A00u},
+     {1u, 0xEA6Bu}, {1u, 0xEA43u}, {1u, 0x8A00u},
++    {0u, 0xEA4Bu},
+ };
++bool g_race_specialize = false;
+ constexpr unsigned kRasterStateCount = sizeof(kRasterStates) / sizeof(kRasterStates[0]);
+ WGPUComputePipeline g_raster_states[kRasterStateCount] = {};
+@@ -638,7 +640,7 @@
+     g_span_start.resize(prims + 1);
+     const std::uint32_t kind = b.prims[1];
+-    // The measured win is in small batches of large menu triangles. Keep
+-    // large 3D batches on the generic pipeline; they showed no repeatable gain.
+-    bool uniform_kind = prims <= 32;
++    // Keep the menu limit except for the measured racing triangle state.
++    const bool racing = g_race_specialize && kind == 0u && b.setups[0] == 0xEA4Bu;
++    bool uniform_kind = prims <= 32 || racing;
+     for (std::uint32_t i = 0; i < prims; ++i) {
+         uniform_kind = uniform_kind && b.prims[i * kPrimWords + 1] == kind;
+@@ -702,4 +704,5 @@
+         if (uniform_flags) {
+             for (unsigned i = 0; i < kRasterStateCount; ++i) {
++                if (prims > 32 && i + 1 != kRasterStateCount) continue;
+                 if (kind == kRasterStates[i].kind && flags == kRasterStates[i].flags && g_raster_states[i]) {
+                     specialized = g_raster_states[i];
+@@ -1836,5 +1839,6 @@
+     const bool specialize = os::env("PS2_RASTER_SPECIALIZE") == "1" &&
+                             (shader_text.empty() || (shader_text.find("override KIND") != std::string::npos && shader_text.find("override FLAGS") != std::string::npos));
+-    const int pipeline_count = kPipelines + (specialize ? kRasterStateCount : 0);
++    g_race_specialize = specialize && os::env("PS2_RACE_SPECIALIZE") == "1";
++    const int pipeline_count = kPipelines + (specialize ? kRasterStateCount - (g_race_specialize ? 0 : 1) : 0);
+     for (int i = 0; i < pipeline_count; ++i) {
+         WGPUComputePipelineDescriptor cd = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -623,4 +623,14 @@
+ }
+ 
++// Indexed 8-bit textures use 128x64 pages. Share page-coordinate arithmetic
++// across the four bilinear taps instead of decoding a generic format each time.
++fn tap8(s: Setup, page: u32, n: u32, k: u32) -> u32 {
++    let a = page + n;
++    let raw = load_texel(Loc((a & 0x3FFFFFu) >> 2u, (a & 3u) * 8u, 0xFFu), k);
++    let e = clut[s.clut * CLUT_ENTRIES + raw];
++    if (s.cpsm == PSMCT32 || s.cpsm == PSMCT24) { return e; }
++    return expand16(e, s);
++}
++
+ fn sample(s: Setup, uin: f32, vin: f32, k: u32) -> u32 {
+     if (!has(s, F_BILINEAR)) {
+@@ -635,4 +645,19 @@
+     let ya = texel_y(s, y0);
+     let yb = texel_y(s, y0 + 1);
++    if (s.dec == 0xFFFFFFFFu && s.tpsm == 0x13u) {
++        let pxa = (xa >> 7u) * 8192u + s.tf.base;
++        let pxb = (xb >> 7u) * 8192u + s.tf.base;
++        let pya = (ya >> 6u) * s.tf.per_row * 8192u;
++        let pyb = (yb >> 6u) * s.tf.per_row * 8192u;
++        let nxa = xa & 127u;
++        let nxb = xb & 127u;
++        let nya = (ya & 63u) * 128u;
++        let nyb = (yb & 63u) * 128u;
++        return blend4(tap8(s, pxa + pya, tables[T_OFF8 + nxa + nya], k),
++                      tap8(s, pxb + pya, tables[T_OFF8 + nxb + nya], k),
++                      tap8(s, pxa + pyb, tables[T_OFF8 + nxa + nyb], k),
++                      tap8(s, pxb + pyb, tables[T_OFF8 + nxb + nyb], k),
++                      u - f32(x0), v - f32(y0));
++    }
+     if (s.dec == 0xFFFFFFFFu && s.tpsm <= 1u) {
+         // 32-bit colour: the page position and the position inside the page are separate sums of the x and the y part

@@ -195,6 +195,63 @@ and 2x resolution also receive shorter shader comparisons. These checks cover
 the sampled scenes; other tracks, effects, GPU drivers and full-game behaviour
 remain unverified. All game-derived outputs stay private under `.local/`.
 
+## Racing follow-up
+
+The race trace's dominant large-triangle state uses flags `0xEA4B`, which was
+absent from the menu specialisations. The racing patch adds that state for
+batches whose primitives and flags all match; the 32-primitive limit stays in
+place for the other specialisations. `PS2_RACE_SPECIALIZE=1` requests the new
+pipeline and is enabled by `--performance`. Setting it to `0` retains the
+previous state selection. It also requires `PS2_RASTER_SPECIALIZE=1` and a
+compatible shader. Other states keep their existing paths.
+
+A second change handles undecoded bilinear PSMT8 textures directly. It shares
+page-coordinate calculations across the four taps, uses the same swizzle
+table, and preserves wrapping, palettes, snapshot reads, sample selection,
+colour expansion and interpolation. Other texture formats and predecoded
+textures retain their previous sampling paths. This built-in shader change
+also runs when racing-state specialisation is disabled.
+
+Alternating short runs gave about 42 fps with the previous preset and 44 fps
+with both changes. For a longer comparison, the same checkpoint at frame 3000
+was driven with Cross held through frame 3600. Discarding warm-up through
+frame 3039 left 561 video-frame timings per run:
+
+| Configuration | First run | Repeated run |
+|---|---:|---:|
+| Previous preset | 45.13 fps | 45.26 fps |
+| Racing state plus indexed-texture sampler | 47.29 fps | 46.86 fps |
+
+That is approximately a 4% gain in this longer segment. Its later frames are
+cheaper than the initial 240-frame sample, so comparing the earlier 42 fps
+directly with the new 47 fps would overstate the improvement. The menu sample
+measured 57.60 fps before and 59.54 afterwards. These measurements are still
+specific to this scene, machine and driver; full-speed racing is unverified.
+
+A final launcher comparison of the archived previous binary against the
+updated built-in shader measured 44.83 versus 46.70 fps over the same 561
+retained frames. Standard and widescreen launch checks passed, as did explicit
+generic fallback and legacy custom-shader checks.
+
+The state and sampler were also tested separately, each producing a small gain.
+Specialising large untextured fill batches did not show a useful improvement
+and is excluded. No filtering quality, depth checks, draw ordering or guest
+clock rates were reduced to obtain these results.
+
+Validation compares menu, standard race, widescreen race and 2x race outputs
+against the archived previous renderer, including images, guest memory and
+audio. The standard race comparison spans 600 guest frames. Profiling-mode
+outputs are checked too. All game-derived captures and traces remain private.
+
+Because the new patch changes context introduced by earlier patches, build
+setup now stages the entire runtime patch series privately. It removes
+installed patches in reverse order there, then verifies and reapplies the
+complete series before copying changed source files back. Unrelated edits
+outside patch context are preserved; conflicts fail before checkout files
+are updated. Unchanged sources keep their timestamps. Synthetic conflict,
+upgrade, repeat-build and symlink tests accompany this helper, and the real
+patch stack is checked against clean and previously patched source trees.
+
 ## Reuse and repository policy
 
 PS2 Web Recomp and this runtime use MIT licensing; PS2Recomp and the cited God

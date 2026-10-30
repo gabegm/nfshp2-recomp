@@ -85,35 +85,43 @@ patches, patched game files and generated binaries stay in `.local/`.
 
 ## Performance
 
-For the tested Intel i5-8350U / UHD 620 laptop, try:
+For the tested Intel i5-8350U / UHD 620 laptop, use:
 
 ```sh
 bash scripts/play.sh --performance
 ```
 
-This disables the separate vector-unit thread and texture predecode, keeps
-internal resolution at 1x, selects 4x4 raster tiles, specialises small uniform
-raster batches, and uses the simpler Crisp display filter instead of cubic
-sharpening and edge smoothing. The game's rendering resolution,
-PS2 timing and arithmetic are unchanged; the final enlarged picture has fewer
-visual enhancements.
+The preset disables the separate vector-unit thread and texture predecode,
+uses 1x internal resolution and 4x4 raster tiles, selects verified shader
+specialisations, and uses the cheaper Crisp display filter. The shader changes
+preserve texture filtering, depth checks, blending, draw order and PS2 timing.
+The final enlarged picture has fewer enhancements than the default display filter.
 
-Short repeated checkpoint tests on battery power gave:
+The latest AC-powered checkpoint comparisons against the previous preset gave:
 
-| Scene | Default | Updated performance preset |
+| Scene | Previous preset | Current preset |
 |---|---:|---:|
-| Main menu | 45 fps | 50–52 fps |
-| Coastal Parklands race | 29 fps | 40–41 fps |
+| Main menu | 57.6 fps | 59.5 fps |
+| Coastal Parklands, longer race segment | 44.8–45.3 fps | 46.7–47.3 fps |
 
-The previous preset reached about 35 fps in that race; switching to the cheaper
-display filter provided the additional gain. Results vary with the scene,
-power limits and background load. These are emulated video frames; the game
-may draw a new picture every other frame. The tested US disc needs 60 video
-frames per second for full speed, so this is still slow motion with stretched
-audio. Disabling audio stretching produces gaps rather than restoring speed.
+The racing gain is about 4% in the same longer segment. A shorter race segment
+improved from roughly 42 to 44 fps; different segments have different costs.
+Results vary with the scene, power limits and background load. These are
+emulated video frames; the game may draw a new picture every other frame.
+The tested US disc needs 60 video frames/s for full speed, so racing remains
+slow motion with stretched audio. Disabling stretching produces audio gaps
+rather than restoring speed. Full-speed play and full-game compatibility
+remain unverified.
 
-Omit `--performance` to use the normal settings. To keep the runtime tuning but
-restore the more expensive display filter:
+The racing patch specialises one matching large-triangle state and shares
+address calculations across bilinear samples of indexed 8-bit textures.
+Other shader states retain their existing paths. `PS2_RACE_SPECIALIZE=0`
+disables the racing-state specialisation while retaining the texture sampler
+improvement. `PS2_RASTER_SPECIALIZE=0` disables both menu and racing state
+specialisations. `PS2_TILE=8` restores the upstream tile size for comparison.
+
+Omit `--performance` to use the normal settings. To keep the runtime tuning
+but restore the more expensive display filter:
 
 ```sh
 PS2_LOOK=sharp_edges bash scripts/play.sh --performance
@@ -122,45 +130,19 @@ PS2_LOOK=sharp_edges bash scripts/play.sh --performance
 Plug into mains power and select the desktop's Performance power profile when
 available. Keep `PS2_SCALE=1`; higher internal resolutions add graphics work.
 The build already uses Release optimization and AVX2 when supported. CPU
-specialization, CPU-specific compiler flags, aggressive inlining and ThinLTO
-were tested but did not produce a repeatable menu improvement, so those
-experiments are not enabled or required by the build.
+compiler-tuning experiments did not produce a repeatable improvement and are
+not required. Existing builds need rebuilding once to install new runtime
+patches. The build validates overlapping patches privately before updating
+source files, so existing installations can upgrade safely.
 
-The presentation patch fixes wgpu-native timestamp-unit conversion in GPU
-profiling. The GPU meter covers compute passes; it excludes the final display
-filter, whose cost was confirmed by comparing frame rates directly. A low GPU
-reading therefore does not establish that display filtering is cheap.
+Menu, race, widescreen and 2x race checks compare raw rendered frames, guest
+memory and audio against the previous renderer. All sampled outputs matched
+byte for byte. Those checks cover the sampled scenes, not every track or effect.
 
-Further AC-powered profiling found the PS2 compute rasterizer to be the main
-graphics cost. Alternating race tests with Crisp improved from 38.6–38.9 fps
-with 8x8 tiles to 41.2–42.0 fps with 4x4 tiles; menu results were about 49–50 fps
-with either size. The preset now defaults to 4x4. Use `PS2_TILE=8` to compare on
-your own GPU. This still does not reach full speed.
-
-The raster shader optimisation brings the sampled menu to about 57–58 fps,
-versus roughly 50–52 with the generic shader. Racing remains about 42 fps;
-no repeatable racing gain was established. Only small batches with matching
-primitive kinds and rendering flags use specialised shaders; other batches
-retain the generic path. Disable this optimisation for comparison with:
-
-```sh
-PS2_RASTER_SPECIALIZE=0 bash scripts/play.sh --performance
-```
-
-Existing builds need rebuilding once to install the new runtime patch.
-
-Optional GPU tracing, including the final display filter, is documented in
-[OPTIMIZATION.md](OPTIMIZATION.md#graphics-profile-on-ac-power).
-
-The runtime changes were checked against the baseline using identical local
-menu/race checkpoints: short-run memory dumps, audio samples and raw rendered
-frames matched byte for byte. The display filter intentionally changes the
-window's final appearance. Full-speed play and full-game compatibility remain
-unverified.
-
-For optimization ideas from Ace Combat 5, God of War and other PS2 projects,
-see [OPTIMIZATION.md](OPTIMIZATION.md). These describe candidate changes;
-their performance results do not establish an NFS speedup.
+For measurements, optional GPU tracing, earlier experiments and ideas from
+Ace Combat 5 and other PS2 projects, see [OPTIMIZATION.md](OPTIMIZATION.md).
+The ordinary GPU meter covers compute passes; the optional trace also measures
+the final display filter. Other projects' results do not establish an NFS speedup.
 
 ## Publication policy
 

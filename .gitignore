@@ -12,16 +12,19 @@
 !/scripts/play.sh
 !/scripts/fetch-widescreen.py
 !/scripts/nointro.py
+!/scripts/apply-runtime-patches.py
 !/tests/
 /tests/*
 !/tests/test_widescreen.py
 !/tests/test_nointro.py
+!/tests/test_runtime_patches.py
 !/patches/
 /patches/*
 !/patches/runtime-compatibility.patch
 !/patches/presentation-performance.patch
 !/patches/graphics-profiling.patch
 !/patches/raster-specialization.patch
+!/patches/racing-performance.patch
 !/patches/LICENSE.upstream
 
 # Never track disc images, including mixed-case extensions, in any directory.

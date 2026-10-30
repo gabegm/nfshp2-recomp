@@ -46,15 +46,12 @@ if [ "$(git -C "$upstream" rev-parse HEAD)" != "$revision" ]; then
   echo "Expected upstream revision $revision; inspect the local checkout before proceeding." >&2
   exit 1
 fi
-for patch_name in runtime-compatibility presentation-performance graphics-profiling raster-specialization; do
-  patch="$root/patches/$patch_name.patch"
-  if git -C "$upstream" apply --reverse --check "$patch" 2>/dev/null; then
-    : # Changes already installed.
-  else
-    git -C "$upstream" apply --check "$patch"
-    git -C "$upstream" apply "$patch"
-  fi
-done
+python3 "$root/scripts/apply-runtime-patches.py" "$upstream" \
+  "$root/patches/runtime-compatibility.patch" \
+  "$root/patches/presentation-performance.patch" \
+  "$root/patches/graphics-profiling.patch" \
+  "$root/patches/raster-specialization.patch" \
+  "$root/patches/racing-performance.patch"
 if [ "$wide" = 1 ]; then
   wide_patch=$(python3 "$root/scripts/fetch-widescreen.py" "$image")
   port_args+=(--widescreen --pnach "$wide_patch" --pnach-section 'Widescreen 16:9' --pnach-section 'HUD fixed for widescreen')
