@@ -156,6 +156,45 @@ All sampled outputs matched byte for byte. Those checks cover the sampled
 scenes, not every track or effect. Captures, checkpoints and detailed traces
 remain ignored under `.local/`.
 
+## Raster shader specialisation
+
+Follow-up experiments on the same UHD 620 specialise the primitive kind and
+feature flags at GPU pipeline creation. The compiler can then remove paths
+that the batch cannot use, while interpolation, texture sampling, blending,
+depth behaviour and draw order keep the existing implementations.
+
+The expensive menu layers are mainly triangles, despite looking like sprites.
+A sprite-only shader showed no meaningful gain. Specialising both kind and
+flags improved the menu, but broad application did not give a repeatable race
+gain. The retained implementation therefore requires at most 32 primitives,
+one kind throughout the batch, and identical feature flags in every setup.
+Six precompiled variants cover triangles/sprites with three observed common
+flag combinations. Other states, mixed batches and larger batches use the
+generic shader. No game executable addresses or translated game code are
+part of this patch.
+
+The final small-batch experiment measured 57.96 and 57.39 menu video frames/s,
+compared with 50.23 in the preceding generic run. An earlier unrestricted
+comparison gave 58.42/58.58 versus 51.69/51.07. One later generic menu run
+dropped to 41.62 with unusually high audio waits (9.49 ms/frame), illustrating
+why these short runs should not be read as an exact universal speedup.
+The small-batch race comparison was 41.87 with specialisation versus 42.09
+without it: effectively unchanged. Full-speed 60 fps is still unverified.
+
+`--performance` enables the feature with `PS2_RASTER_SPECIALIZE=1`; setting it
+to `0` selects the generic shader. The runtime itself defaults to generic
+unless requested. Older custom WGSL files without the new override declarations
+also retain the generic path. Additional pipeline compilation can increase
+startup time. GPU statistics report which specialised batch states were used.
+The detailed profiler and captured-work GPU benchmark select the same pipelines
+as normal rendering.
+
+Checks compare deterministic menu, race and widescreen race images, guest
+memory and audio against the previous renderer over 120-frame runs. Native
+and 2x resolution also receive shorter shader comparisons. These checks cover
+the sampled scenes; other tracks, effects, GPU drivers and full-game behaviour
+remain unverified. All game-derived outputs stay private under `.local/`.
+
 ## Reuse and repository policy
 
 PS2 Web Recomp and this runtime use MIT licensing; PS2Recomp and the cited God

@@ -46,7 +46,7 @@ if [ "$(git -C "$upstream" rev-parse HEAD)" != "$revision" ]; then
   echo "Expected upstream revision $revision; inspect the local checkout before proceeding." >&2
   exit 1
 fi
-for patch_name in runtime-compatibility presentation-performance graphics-profiling; do
+for patch_name in runtime-compatibility presentation-performance graphics-profiling raster-specialization; do
   patch="$root/patches/$patch_name.patch"
   if git -C "$upstream" apply --reverse --check "$patch" 2>/dev/null; then
     : # Changes already installed.

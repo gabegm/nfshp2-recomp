@@ -10,6 +10,7 @@ allowed = {
     'patches/LICENSE.upstream',
     'patches/presentation-performance.patch',
     'patches/graphics-profiling.patch',
+    'patches/raster-specialization.patch',
     'scripts/fetch-widescreen.py',
     'OPTIMIZATION.md',
     'tests/test_widescreen.py',

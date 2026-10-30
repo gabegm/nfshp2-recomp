@@ -92,8 +92,9 @@ bash scripts/play.sh --performance
 ```
 
 This disables the separate vector-unit thread and texture predecode, keeps
-internal resolution at 1x, selects 4x4 raster tiles, and uses the simpler Crisp display filter instead
-of cubic sharpening and edge smoothing. The game's rendering resolution,
+internal resolution at 1x, selects 4x4 raster tiles, specialises small uniform
+raster batches, and uses the simpler Crisp display filter instead of cubic
+sharpening and edge smoothing. The game's rendering resolution,
 PS2 timing and arithmetic are unchanged; the final enlarged picture has fewer
 visual enhancements.
 
@@ -135,6 +136,18 @@ graphics cost. Alternating race tests with Crisp improved from 38.6–38.9 fps
 with 8x8 tiles to 41.2–42.0 fps with 4x4 tiles; menu results were about 49–50 fps
 with either size. The preset now defaults to 4x4. Use `PS2_TILE=8` to compare on
 your own GPU. This still does not reach full speed.
+
+The raster shader optimisation brings the sampled menu to about 57–58 fps,
+versus roughly 50–52 with the generic shader. Racing remains about 42 fps;
+no repeatable racing gain was established. Only small batches with matching
+primitive kinds and rendering flags use specialised shaders; other batches
+retain the generic path. Disable this optimisation for comparison with:
+
+```sh
+PS2_RASTER_SPECIALIZE=0 bash scripts/play.sh --performance
+```
+
+Existing builds need rebuilding once to install the new runtime patch.
 
 Optional GPU tracing, including the final display filter, is documented in
 [OPTIMIZATION.md](OPTIMIZATION.md#graphics-profile-on-ac-power).

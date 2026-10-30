@@ -1,0 +1,183 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -92,4 +92,14 @@
+ WGPUBindGroup g_group = nullptr;
+ WGPUComputePipeline g_pipelines[kPipelines] = {};
++// Bounded specializations for uniform sprite/triangle batches; all others retain
++// the generic rasterizer. Flags are checked against every setup in the batch.
++struct RasterState { std::uint32_t kind, flags; };
++constexpr RasterState kRasterStates[] = {
++    {0u, 0xEA6Bu}, {0u, 0xEA43u}, {0u, 0x8A00u},
++    {1u, 0xEA6Bu}, {1u, 0xEA43u}, {1u, 0x8A00u},
++};
++constexpr unsigned kRasterStateCount = sizeof(kRasterStates) / sizeof(kRasterStates[0]);
++WGPUComputePipeline g_raster_states[kRasterStateCount] = {};
++std::uint64_t g_raster_state_batches[kRasterStateCount] = {};
+ 
+ struct Command {
+@@ -97,5 +107,10 @@
+     std::uint32_t x, y;
+     std::uint32_t param;
++    WGPUComputePipeline specialized = nullptr;
+ };
++
++WGPUComputePipeline pipeline_for(const Command &c) {
++    return c.specialized ? c.specialized : g_pipelines[c.pipeline];
++}
+ 
+ struct CommandInfo {
+@@ -622,5 +637,10 @@
+     g_spans.clear();
+     g_span_start.resize(prims + 1);
++    const std::uint32_t kind = b.prims[1];
++    // The measured win is in small batches of large menu triangles. Keep
++    // large 3D batches on the generic pipeline; they showed no repeatable gain.
++    bool uniform_kind = prims <= 32;
+     for (std::uint32_t i = 0; i < prims; ++i) {
++        uniform_kind = uniform_kind && b.prims[i * kPrimWords + 1] == kind;
+         g_span_start[i] = static_cast<std::uint32_t>(g_spans.size());
+         add_spans(b.prims.data() + i * kPrimWords, b.boxes[i * 2], b.boxes[i * 2 + 1]);
+@@ -675,5 +695,20 @@
+         g_why = kWhyFlush;
+     }
+-    g_commands.push_back({kRaster, std::min(tiles, 1024u), (tiles + 1023) / 1024, param});
++    WGPUComputePipeline specialized = nullptr;
++    if (uniform_kind) {
++        const std::uint32_t flags = b.setups[0];
++        bool uniform_flags = true;
++        for (std::size_t i = 0; i < b.setups.size(); i += kSetupWords) uniform_flags = uniform_flags && b.setups[i] == flags;
++        if (uniform_flags) {
++            for (unsigned i = 0; i < kRasterStateCount; ++i) {
++                if (kind == kRasterStates[i].kind && flags == kRasterStates[i].flags && g_raster_states[i]) {
++                    specialized = g_raster_states[i];
++                    ++g_raster_state_batches[i];
++                    break;
++                }
++            }
++        }
++    }
++    g_commands.push_back({kRaster, std::min(tiles, 1024u), (tiles + 1023) / 1024, param, specialized});
+     mark_rendered(pages(b.fbp, b.fbw, b.fpsm, b.minx, b.miny, b.maxx, b.maxy));
+     if (b.zwrite) mark_rendered(pages(b.zbp, b.fbw, b.zpsm, b.minx, b.miny, b.maxx, b.maxy));
+@@ -916,5 +951,5 @@
+         if (i < n) cd.timestampWrites = &writes;
+         WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &cd);
+-        wgpuComputePassEncoderSetPipeline(pass, g_pipelines[c.pipeline]);
++        wgpuComputePassEncoderSetPipeline(pass, pipeline_for(c));
+         const std::uint32_t offset = c.param * kParamStride;
+         wgpuComputePassEncoderSetBindGroup(pass, 0, g_group, 1, &offset);
+@@ -1022,5 +1057,5 @@
+     if (measure) cd.timestampWrites = &writes;
+     WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &cd);
+-    Pipeline current = kPipelines;
++    WGPUComputePipeline current = nullptr;
+     ++g_submits;
+     ++g_total_passes;
+@@ -1035,7 +1070,7 @@
+         ++g_dispatches[c.pipeline];
+         if (skip & (1u << c.pipeline)) continue;
+-        if (c.pipeline != current) {
+-            wgpuComputePassEncoderSetPipeline(pass, g_pipelines[c.pipeline]);
+-            current = c.pipeline;
++        if (pipeline_for(c) != current) {
++            wgpuComputePassEncoderSetPipeline(pass, pipeline_for(c));
++            current = pipeline_for(c);
+         }
+         const std::uint32_t offset = c.param * kParamStride;
+@@ -1175,11 +1210,11 @@
+         for (std::size_t i = 0; i < g_bench.subs.size(); ++i) {
+             WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, nullptr);
+-            Pipeline current = kPipelines;
++            WGPUComputePipeline current = nullptr;
+             for (const Command &c : g_bench.subs[i].commands) {
+                 if (skip & (1u << c.pipeline)) continue;
+                 if (size_filter && c.pipeline == kRaster && ((c.x * c.y <= 8u) == (size_filter == 1))) continue;  // 1: leave out the small runs (8 tiles or fewer), 2: leave out the big ones
+-                if (c.pipeline != current) {
+-                    wgpuComputePassEncoderSetPipeline(pass, g_pipelines[c.pipeline]);
+-                    current = c.pipeline;
++                if (pipeline_for(c) != current) {
++                    wgpuComputePassEncoderSetPipeline(pass, pipeline_for(c));
++                    current = pipeline_for(c);
+                 }
+                 const std::uint32_t offset = c.param * kParamStride;
+@@ -1206,5 +1241,5 @@
+     WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
+     WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, nullptr);
+-    wgpuComputePassEncoderSetPipeline(pass, g_pipelines[c.pipeline]);
++    wgpuComputePassEncoderSetPipeline(pass, pipeline_for(c));
+     const std::uint32_t offset = c.param * kParamStride;
+     for (unsigned i = 0; i < count; ++i) {
+@@ -1799,10 +1834,13 @@
+     const auto compile_start = std::chrono::steady_clock::now();
+     WGPUShaderModule module = wgpuDeviceCreateShaderModule(g_device, &md);
+-    for (int i = 0; i < kPipelines; ++i) {
++    const bool specialize = os::env("PS2_RASTER_SPECIALIZE") == "1" &&
++                            (shader_text.empty() || (shader_text.find("override KIND") != std::string::npos && shader_text.find("override FLAGS") != std::string::npos));
++    const int pipeline_count = kPipelines + (specialize ? kRasterStateCount : 0);
++    for (int i = 0; i < pipeline_count; ++i) {
+         WGPUComputePipelineDescriptor cd = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+         cd.layout = g_pipeline_layout;
+         cd.compute.module = module;
+-        cd.compute.entryPoint = view(kEntryPoints[i]);
+-        WGPUConstantEntry constants[3] = {WGPU_CONSTANT_ENTRY_INIT, WGPU_CONSTANT_ENTRY_INIT, WGPU_CONSTANT_ENTRY_INIT};
++        cd.compute.entryPoint = view(i >= kPipelines ? "raster" : kEntryPoints[i]);
++        WGPUConstantEntry constants[5] = {WGPU_CONSTANT_ENTRY_INIT, WGPU_CONSTANT_ENTRY_INIT, WGPU_CONSTANT_ENTRY_INIT, WGPU_CONSTANT_ENTRY_INIT, WGPU_CONSTANT_ENTRY_INIT};
+         constants[0].key = view("SCALE");
+         constants[0].value = static_cast<double>(g_scale);
+@@ -1815,9 +1853,18 @@
+         const bool has_fma = shader_text.empty() || shader_text.find("override EXPLICIT_FMA") != std::string::npos;
+         cd.compute.constantCount = has_tile ? (has_fma ? 3 : 2) : 1;
++        if (i >= kPipelines) {
++            const RasterState &state = kRasterStates[i - kPipelines];
++            constants[cd.compute.constantCount].key = view("KIND");
++            constants[cd.compute.constantCount++].value = static_cast<double>(state.kind);
++            constants[cd.compute.constantCount].key = view("FLAGS");
++            constants[cd.compute.constantCount++].value = static_cast<double>(state.flags);
++        }
+         cd.compute.constants = constants;
+-        g_pipelines[i] = wgpuDeviceCreateComputePipeline(g_device, &cd);
+-        if (!g_pipelines[i]) return false;
+-    }
+-    std::fprintf(stderr, "[gpu] %d shaders compiled in %.0f ms\n", kPipelines, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compile_start).count());
++        WGPUComputePipeline pipeline = wgpuDeviceCreateComputePipeline(g_device, &cd);
++        if (!pipeline) return false;
++        if (i >= kPipelines) g_raster_states[i - kPipelines] = pipeline;
++        else g_pipelines[i] = pipeline;
++    }
++    std::fprintf(stderr, "[gpu] %d shaders compiled in %.0f ms\n", pipeline_count, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compile_start).count());
+     wgpuShaderModuleRelease(module);
+     ensure_capacity();
+@@ -2252,4 +2299,8 @@
+     for (int i = 0; i < kPipelines; ++i) std::fprintf(stderr, " %s %llu", kEntryPoints[i], static_cast<unsigned long long>(g_dispatches[i]));
+     std::fprintf(stderr, "\n");
++    for (unsigned i = 0; i < kRasterStateCount; ++i)
++        if (g_raster_state_batches[i])
++            std::fprintf(stderr, "[gpu] specialized raster kind %u flags %04X: %llu batches\n", kRasterStates[i].kind, kRasterStates[i].flags,
++                         static_cast<unsigned long long>(g_raster_state_batches[i]));
+ }
+ 
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -14,4 +14,8 @@
+ override SCALE: u32 = 1u;
+ override TILE: u32 = 16u;
++// Unset overrides retain the generic path. The host validates the whole batch
++// before selecting a pipeline with fixed primitive kind and feature flags.
++override KIND: u32 = 0xFFFFFFFFu;
++override FLAGS: u32 = 0xFFFFFFFFu;
+ 
+ override EXPLICIT_FMA: bool = false;
+@@ -494,4 +498,5 @@
+ 
+ fn has(s: Setup, f: u32) -> bool {
++    if (FLAGS != 0xFFFFFFFFu) { return (FLAGS & f) != 0u; }
+     return (s.flags & f) != 0u;
+ }
+@@ -980,5 +985,6 @@
+ 
+ fn shade_at(p: u32, s: Setup, x: i32, y: i32, k: u32, px: f32, py: f32) {
+-    let kind = data[p + 1u];
++    var kind = KIND;
++    if (KIND == 0xFFFFFFFFu) { kind = data[p + 1u]; }
+     var at: Attr;
+     switch kind {
