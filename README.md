@@ -126,6 +126,11 @@ unchanged. Uploads, rendering, local copies and state restoration invalidate
 it. `PS2_CLUT_REUSE=0` disables this optimization; shader overrides and GPU
 skip/replay experiments automatically retain the original path.
 
+The upload-cache eviction fix also removes unnecessary submissions: 2,389
+became 600 in the early 600-frame sample, using the same 16 MB cache. That
+comparison did not establish an FPS gain; the speed figures above remain the
+relevant expectation.
+
 Omit `--performance` to use the normal settings. To keep the runtime tuning
 but restore the more expensive display filter:
 
@@ -142,8 +147,17 @@ patches. The build validates overlapping patches privately before updating
 source files, so existing installations can upgrade safely.
 
 Menu, early/later race, widescreen and 2x race checks compare raw rendered frames, guest
-memory and audio against the previous renderer. All sampled outputs matched
+memory, audio and full save states against the previous renderer. All sampled outputs matched
 byte for byte. Those checks cover the sampled scenes, not every track or effect.
+
+Run the setup tests with:
+
+```sh
+python3 -m unittest discover -s tests
+```
+
+The upload-cache test uses synthetic data and a C++17 compiler to exercise the
+installed runtime code. It skips if the private checkout or compiler is absent.
 
 For measurements, optional CPU/GPU tracing, earlier experiments and ideas from
 Ace Combat 5 and other PS2 projects, see [OPTIMIZATION.md](OPTIMIZATION.md).

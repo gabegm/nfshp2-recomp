@@ -1,0 +1,14 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -389,7 +389,10 @@
+             if (!evict_front()) return false;
+         g_cache_head = 0;
+     }
+-    while (!g_cache_ring.empty() && g_cache_ring.front().offset < g_cache_head + words)
++    // Entries behind the write head belong to the current lap and do not
++    // overlap this append. Evict only older entries ahead of it; treating
++    // every earlier allocation as overlap discards the cache on each insert.
++    while (!g_cache_ring.empty() && g_cache_ring.front().offset >= g_cache_head && g_cache_ring.front().offset < g_cache_head + words)
+         if (!evict_front()) return false;
+     offset = g_cache_head;
+     std::uint32_t *to = g_cache_copy.data() + offset;

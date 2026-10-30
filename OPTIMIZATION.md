@@ -417,6 +417,69 @@ The built-in shader is restored to the verified palette-cache milestone.
 Further work should measure whole-frame effects across multiple race scenes,
 not select a shader change from one favorable segment.
 
+## Refreshed command-overhead investigation
+
+After palette reuse, rendering-thread CPU sampling collected 6665 early-race
+samples and 4616 later-scene samples. The Intel Vulkan driver accounted for
+41.04%/37.95%, batch emission for 18.20%/18.57%, and draw setup for
+9.00%/8.08%. These remain CPU shares, not full-frame or GPU-time percentages.
+
+Three private experiments targeted command overhead:
+
+- Native immediate parameters replaced per-dispatch dynamic uniform rebinding
+  on supported adapters. Early off runs measured 50.59/51.11 fps, versus
+  50.72/50.88 on; later 58.70 versus 58.31. There was no repeatable win.
+- Conservative regrouping moved uploads only across disjoint palette reads,
+  preserving each operation type's order and rejecting wrapped/uncertain ranges.
+  It reduced early dispatches by 4,634 (1,453 uploads and 3,181 palette commands)
+  over 600 frames. Off runs were 50.68/50.89 fps and on 51.18/50.59; later
+  58.18 versus 57.92. Fewer commands did not establish an FPS improvement.
+- Increasing the upload cache from 16 to 64 MB made forced submissions worse:
+  1,789 versus 7,087 in the initial sample. This exposed an eviction defect
+  rather than insufficient cache capacity. The larger cache also changed the
+  maximum eligible entry size, so capacity alone cannot explain that difference.
+
+None of those prototypes or options is installed in the public patch stack.
+The default cache capacity remains 16 MB.
+
+### Upload-cache eviction fix
+
+`upload-cache-eviction.patch` corrects the actual defect: when appending to
+free ring storage, the old check treated earlier allocations behind the write
+head as overlapping. This could reject a second independent insertion in the
+same submission and force a submit before unnecessarily evicting the first.
+The fix excludes those allocations. Existing wrap handling, hash-plus-byte
+verification and the prohibition on overwriting entries used by pending
+commands remain in place. No cache capacity or guest timing changes are needed.
+
+The fixed early scene submitted 600 times versus 2,389 for the reference,
+a reduction of about 75%. Later counts were 598 versus 2,340. The early
+561-interval FPS comparisons were 51.09/50.41 reference and 51.11/50.59 fixed;
+the later sample was 58.69 versus 58.82. This does not establish a repeatable
+FPS gain. The change is retained as a cache eviction fix, not advertised as
+full-speed racing or a large performance improvement.
+
+The new synthetic regression test compiles the actual installed runtime cache
+functions with a small fake GPU buffer. It tests independent pending appends,
+hash collisions, 20,000 mixed operations and 2,057 wraps, and rejects writes
+that overlap pending GPU references. The original implementation fails its
+second non-overlapping append; the fixed implementation passes. No game
+code or ROM is used. The test skips when the private runtime checkout or a
+C++17 compiler is absent. Images, raw audio, guest RAM and full save states
+also matched the archived renderer for the 600-frame opening race,
+120-frame later/menu/widescreen samples, 24 frames at 2x resolution and
+24 frames with texture predecode enabled. All 24 tests pass, and fresh,
+upgrade and repeat patch stacks match the tested private runtime.
+
+A separate short GPU dispatch trace on the fixed renderer attributed 75.02%
+of measured compute dispatch time to rasterization, 18.82% to uploads,
+5.35% to palette loads and 0.81% to display conversion. It splits commands
+into separate passes and waits for timestamps, so these are diagnostic shares,
+not an ordinary frame-time breakdown. Together with the unchanged FPS after
+removing most submissions, this directs the next major optimization toward
+raster work and memory traffic. Driver CPU sample shares alone did not predict
+an FPS improvement from cheaper command encoding.
+
 ## Reuse and repository policy
 
 PS2 Web Recomp and this runtime use MIT licensing; PS2Recomp and the cited God
