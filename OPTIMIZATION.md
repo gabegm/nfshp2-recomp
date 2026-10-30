@@ -388,6 +388,35 @@ application preserves file timestamps. Launcher tests cover enabling the
 cache only in the performance preset and honoring an explicit disable.
 Checkpoints, captures, generated code and binaries remain private.
 
+## Target-address caching experiment (not retained)
+
+A private shader prototype computed framebuffer/depth addresses when loading
+its setup instead of for every covered primitive. Pixel coordinates remain
+fixed within a raster invocation; only addresses were cached, with all VRAM
+reads/writes and tests left in their original order. Images, memory, raw audio
+and full save states matched the palette-cache milestone in eight checks:
+the initial/later/menu/widescreen scenes, 2x/3x resolutions, texture predecode,
+and the generic pipeline using upstream 8x8 tiles.
+
+Correctness did not establish a broad performance win. Isolated override
+runs gained about 1% in the opening race (48.56/48.70 to 49.05/49.21 fps).
+Integrated runs with palette reuse gained about 1.5% there
+(50.23/50.50 to 50.79/51.48 fps), but later runs were mixed: an initial
+58.44 to 57.57 fps, followed by reference 58.57/58.57 versus candidate
+57.79/59.28 fps. Thus a reliable later-scene gain was not established.
+
+A narrower prototype calculated addresses only after a pixel passed coverage
+and scan masking, then reused them until the setup changed. Its early runs
+were 50.49/50.50 fps for the reference and 51.40/50.49 fps for the candidate,
+a small difference within the observed variation. Its later comparisons
+measured 58.04/58.96 fps for the reference and 57.54/58.30 fps for the candidate.
+Reference and candidate had matching executable basenames in this final
+experiment to keep the audio-device name consistent.
+Neither prototype is installed or included in the public patch stack.
+The built-in shader is restored to the verified palette-cache milestone.
+Further work should measure whole-frame effects across multiple race scenes,
+not select a shader change from one favorable segment.
+
 ## Reuse and repository policy
 
 PS2 Web Recomp and this runtime use MIT licensing; PS2Recomp and the cited God
