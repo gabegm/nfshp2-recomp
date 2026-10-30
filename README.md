@@ -93,20 +93,20 @@ bash scripts/play.sh --performance
 
 The preset disables the separate vector-unit thread and texture predecode,
 uses 1x internal resolution and 4x4 raster tiles, selects verified shader
-specialisations, and uses the cheaper Crisp display filter. The shader changes
+specialisations, reuses redundant palette loads, and uses the cheaper Crisp display filter. The shader changes
 preserve texture filtering, depth checks, blending, draw order and PS2 timing.
 The final enlarged picture has fewer enhancements than the default display filter.
 
-The latest AC-powered comparisons before and after the 4-bit sampler gave:
+The latest AC-powered palette-reuse comparisons gave:
 
-| Scene | Previous preset | Current preset |
+| Scene | Palette reuse off | Performance preset |
 |---|---:|---:|
-| Coastal Parklands, early 600-frame segment | 46.47–46.72 fps | 48.42–48.62 fps |
-| Later 600-frame segment | 58.57 fps | 59.09 fps |
+| Coastal Parklands, early 600-frame segment | 49.07 fps | 50.62 fps |
 
-The early-segment gain is about 4%. Its busier initial 240-frame sample
-improved from about 43.9 to 45.3–46.0 fps; different segments have different
-costs. The final menu sample measured about 59.7 fps.
+The early-segment gain is about 3%; earlier paired runs measured
+48.50–49.11 fps without reuse and 50.58–50.92 fps with it. Later race
+samples remain around 59 fps. The previous 4-bit texture sampler improvement
+was a separate gain of about 4%. The menu sample measured about 59.7 fps.
 Results vary with the scene, power limits and background load. These are
 emulated video frames; the game may draw a new picture every other frame.
 The tested US disc needs 60 video frames/s for full speed, so racing remains
@@ -120,6 +120,11 @@ Other shader states retain their existing paths. `PS2_RACE_SPECIALIZE=0`
 disables the racing-state specialisation while retaining the texture sampler
 improvement. `PS2_RASTER_SPECIALIZE=0` disables both menu and racing state
 specialisations. `PS2_TILE=8` restores the upstream tile size for comparison.
+
+The palette cache skips consecutive identical reloads while VRAM remains
+unchanged. Uploads, rendering, local copies and state restoration invalidate
+it. `PS2_CLUT_REUSE=0` disables this optimization; shader overrides and GPU
+skip/replay experiments automatically retain the original path.
 
 Omit `--performance` to use the normal settings. To keep the runtime tuning
 but restore the more expensive display filter:

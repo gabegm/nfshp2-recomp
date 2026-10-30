@@ -349,6 +349,45 @@ construction; they do not establish that every driver sample is removable.
 Raw profiles and symbol dumps remain private because the executable also
 contains generated game functions.
 
+## Consecutive palette reload reuse
+
+Rendering-thread source-line sampling put about 13% of CPU samples in
+`flush_batch` and another 4–5% in triangle span generation. Pointer caching in
+tile-list construction did not produce a repeatable FPS gain. A fused small
+upload/palette GPU kernel also failed to improve measured FPS; too few
+commands qualified. A conservative uploaded-word shadow skipped fewer than
+1% of eligible transfers and added bookkeeping, so it was discarded.
+None of these prototypes is installed by the setup.
+
+Palette counters revealed a more useful target: the early 600-frame scene
+requested 801,216 palette loads, grouped into about 38,000 GPU commands.
+`palette-reuse.patch` skips a consecutive identical load only while no VRAM
+write has intervened. Its key includes all eight source/load parameters used
+by the shader. Uploads, raster batches, local copies and restored state
+invalidate it. Pending geometry still undergoes the original source-conflict
+check and flush before reuse is considered. A repeated load is idempotent:
+its modified entries already contain the same values and its untouched
+entries are already in the current palette slot. CPU GS load bookkeeping
+and draw order are preserved. Custom shaders, GPU skip and benchmark replay
+disable the cache, and `PS2_CLUT_REUSE=0` provides a comparison path.
+
+The initial windowed test reused 683,244 of 801,216 requests (85%). Paired
+AC-powered early-scene runs gave 48.50/49.11 fps off and 50.58/50.92 fps on.
+A final implementation using a validity flag instead of a VRAM generation
+counter measured 49.07 fps off and 50.62 fps on over the same 561 retained
+frame intervals. Later scenes remain near the video-rate limit; no reliable
+additional gain is claimed there. Instrumented traces are separate from FPS
+runs. These gains do not make the early race run at full speed.
+
+Validation compared cache off/on for a 600-frame initial race, 120-frame
+later/menu/widescreen samples, a 24-frame 2x sample and a 24-frame texture
+predecode sample. Captured images, guest memory, raw audio and full save
+states (including GPU VRAM and the current palette) matched byte for byte.
+Fresh and upgrade patch stacks match the tested private source; repeat
+application preserves file timestamps. Launcher tests cover enabling the
+cache only in the performance preset and honoring an explicit disable.
+Checkpoints, captures, generated code and binaries remain private.
+
 ## Reuse and repository policy
 
 PS2 Web Recomp and this runtime use MIT licensing; PS2Recomp and the cited God

@@ -29,6 +29,8 @@ if [ "$performance" = 1 ]; then
   # Specialize uniform raster batches; unsupported states use the generic path.
   export PS2_RASTER_SPECIALIZE="${PS2_RASTER_SPECIALIZE:-1}"
   export PS2_RACE_SPECIALIZE="${PS2_RACE_SPECIALIZE:-1}"
+  # Reuse consecutive identical palette loads until VRAM can change.
+  export PS2_CLUT_REUSE="${PS2_CLUT_REUSE:-1}"
   # The default cubic sharpening filter costs substantial time on the UHD 620.
   export PS2_LOOK="${PS2_LOOK:-crisp}"
 fi

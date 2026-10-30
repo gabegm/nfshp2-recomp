@@ -1,0 +1,86 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -193,6 +193,11 @@
+     std::uint32_t &operator[](std::size_t i) { return words[i]; }
+ } g_arena;
+ std::uint32_t g_clut_slot = 0, g_clut_loads = 0, g_texflushes = 0;
++// Only consecutive identical loads can reuse the current physical palette slot.
++// Every possible VRAM write invalidates this conservative cache.
++bool g_clut_reuse = false, g_clut_last_valid = false;
++std::uint64_t g_clut_reused = 0, g_clut_requests = 0;
++std::array<std::uint32_t, 8> g_clut_last_key{};
+ 
+ struct Image {
+     bool active = false;
+@@ -513,6 +518,7 @@
+ }
+ 
+ void mark_rendered(const Range &r) {
++    if (g_clut_reuse) g_clut_last_valid = false;
+     for (std::uint64_t at = r.lo; at < r.hi; at += 8192) g_rendered[(at >> 13) & 511u] = true;
+ }
+ 
+@@ -786,6 +792,7 @@
+     g_why = op.clut ? kWhyClut : kWhyUpload;
+     if (batch_conflict(op.range, op.clut)) emit_all();
+     g_why = kWhyFlush;
++    if (g_clut_reuse && !op.clut) g_clut_last_valid = false;
+     g_pre.push_back(op);
+ }
+ 
+@@ -1817,6 +1824,8 @@
+ 
+     // PS2_GS_SHADER=<file>: use this WGSL text instead of the built-in one (shader experiments without a rebuild)
+     std::string shader_text;
++    g_clut_reuse = os::env("PS2_CLUT_REUSE") == "1" && os::env("PS2_GS_SHADER").empty() &&
++                   os::env("PS2_GPU_SKIP").empty() && os::env("PS2_GPU_BENCH").empty();
+     if (const std::string path = os::env("PS2_GS_SHADER"); !path.empty()) {
+         if (std::FILE *f = os::open(path.c_str(), "rb")) {
+             char buffer[65536];
+@@ -2162,9 +2171,30 @@
+     std::memcpy(op.rec, rec, sizeof rec);
+     op.range = csm ? region(cbp, cbw, cpsm, static_cast<int>(cou * 16), static_cast<int>(cov), static_cast<int>(cou * 16 + 255), static_cast<int>(cov))
+                    : region(cbp, 1, cpsm, 0, 0, 15, 15);
++    if (g_clut_reuse) {
++        ++g_clut_requests;
++        // Retain the existing flush before a palette read can observe writes
++        // from pending geometry. That flush invalidates palette reuse.
++        if (batch_conflict(op.range, true)) {
++            g_why = kWhyClut;
++            emit_all();
++            g_why = kWhyFlush;
++        }
++        if (g_clut_last_valid &&
++            std::equal(g_clut_last_key.begin(), g_clut_last_key.end(), op.rec + 2)) {
++            // Loading the same entries from unchanged VRAM is idempotent;
++            // the untouched entries are already present in the current slot.
++            ++g_clut_reused;
++            return;
++        }
++    }
+     queue_pre(op);
+     g_clut_slot = next;
+     ++g_clut_loads;
++    if (g_clut_reuse) {
++        std::copy_n(op.rec + 2, g_clut_last_key.size(), g_clut_last_key.begin());
++        g_clut_last_valid = true;
++    }
+ }
+ 
+ void texflush() { ++g_texflushes; }
+@@ -2282,6 +2312,7 @@
+ 
+ void write_state(const std::vector<std::uint32_t> &vram, std::uint32_t scale, const std::vector<std::uint32_t> &clut) {
+     wait_idle();
++    g_clut_last_valid = false;
+     const std::size_t words = kMemorySize / 4;
+     const std::uint32_t from = scale * scale, to = g_scale * g_scale;
+     std::fill(std::begin(g_rendered), std::end(g_rendered), from == to && to > 1);
+@@ -2299,6 +2330,7 @@
+ 
+ void stats() {
+     if (g_mode == Mode::off) return;
++    if (g_clut_reuse) std::fprintf(stderr, "[gpu] reused palette reloads: %llu / %llu\n", static_cast<unsigned long long>(g_clut_reused), static_cast<unsigned long long>(g_clut_requests));
+     std::fprintf(stderr, "[gpu] %llu submits, dispatches:", static_cast<unsigned long long>(g_submits));
+     for (int i = 0; i < kPipelines; ++i) std::fprintf(stderr, " %s %llu", kEntryPoints[i], static_cast<unsigned long long>(g_dispatches[i]));
+     std::fprintf(stderr, "\n");

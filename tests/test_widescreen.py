@@ -102,7 +102,7 @@ class LauncherTests(unittest.TestCase):
             runner.parent.mkdir(parents=True)
             runner.write_text('#!/usr/bin/env python3\nimport json,os,sys\n'
                               'print(json.dumps({"args":sys.argv,"look":os.getenv("PS2_LOOK"),'
-                              '"keys":os.getenv("PS2_KEYS")}))\n')
+                              '"keys":os.getenv("PS2_KEYS"),"clut_reuse":os.getenv("PS2_CLUT_REUSE")}))\n')
             runner.chmod(0o755)
         (upstream / 'games/nfshp2-wide/patches.txt').write_text('')
         self.environment = {k: v for k, v in os.environ.items() if not k.startswith('PS2_')}
@@ -118,6 +118,18 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(run['args'][1], 'games/nfshp2/disc/BOOT.ELF')
         self.assertNotIn('--widescreen', run['args'])
         self.assertEqual(run['look'], 'crisp')
+        self.assertEqual(run['clut_reuse'], '1')
+
+    def test_palette_reuse_respects_explicit_disable(self):
+        self.environment['PS2_CLUT_REUSE'] = '0'
+        result = self.launch('--performance', '--frames', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['clut_reuse'], '0')
+
+    def test_normal_launcher_leaves_palette_reuse_unset(self):
+        result = self.launch('--frames', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(json.loads(result.stdout)['clut_reuse'])
 
     def test_widescreen_uses_matching_program_and_runtime_patches_in_either_flag_order(self):
         for flags in [('--performance', '--widescreen'), ('--widescreen', '--performance'),
