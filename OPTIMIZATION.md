@@ -305,6 +305,50 @@ private. The generic shader with texture predecode enabled also matched the
 archived renderer. The same patch-stack staging helper handles fresh builds, upgrades
 and repeat builds; no additional launch arguments are required.
 
+## Rendering-thread CPU sampling
+
+`PS2_PROFILE_RENDER=1` optionally targets the existing native CPU sampler at
+the rendering thread on Linux x86-64. A POSIX thread CPU clock drives 1 kHz
+samples delivered to that thread; time blocked on GPU/presentation waits does
+not count as CPU work. The emulation worker can arm the timer at the chosen
+guest frame, while the window thread stops it and writes results after joining
+the worker. The existing process-wide sampler remains available without this
+option. Profiling is disabled unless `PS2_PROFILE` is set.
+
+```sh
+mkdir -p .local/cpu-profile
+PS2_PROFILE="$PWD/.local/cpu-profile/render.txt" PS2_PROFILE_RENDER=1 \
+  PS2_PROFILE_FROM=600 bash scripts/play.sh --performance --nointro
+```
+
+Choose a start frame after loading/compilation and in the intended race scene.
+The example samples from guest frame 600; when resuming a checkpoint, the start
+frame must be ahead of its saved frame. Close the window normally to write the
+profile. It requires a threaded window run; `--frames-dir`, `PS2_ONE_THREAD`
+and `PS2_TIME` disable that arrangement. The profile header identifies
+`render-thread-cpu`. Keep instrumented runs separate from FPS comparisons.
+Native executable offsets can be resolved against its unstripped symbol table
+using `nm` or `llvm-symbolizer`; inlined work is attributed to its enclosing
+function unless a private build includes debug information.
+
+The early 600-frame race sample collected 6554 CPU samples with zero lost
+samples; the later scene collected 4962, also with zero lost. The target thread
+and the emulation thread that armed it had different Linux thread IDs.
+Approximate rendering-thread CPU sample shares were:
+
+| Work | Early race | Later scene |
+|---|---:|---:|
+| Intel Vulkan driver | 38.25% | 40.41% |
+| `emit_all` (including inlined batch work) | 18.98% | 17.92% |
+| Draw setup | 9.35% | 8.06% |
+| GIF packet rendering | 4.55% | 4.88% |
+
+Libc accounted for another 7–8%. These are CPU sample shares, not full-frame
+time or GPU durations. They point toward driver command overhead and batch
+construction; they do not establish that every driver sample is removable.
+Raw profiles and symbol dumps remain private because the executable also
+contains generated game functions.
+
 ## Reuse and repository policy
 
 PS2 Web Recomp and this runtime use MIT licensing; PS2Recomp and the cited God

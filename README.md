@@ -140,7 +140,7 @@ Menu, early/later race, widescreen and 2x race checks compare raw rendered frame
 memory and audio against the previous renderer. All sampled outputs matched
 byte for byte. Those checks cover the sampled scenes, not every track or effect.
 
-For measurements, optional GPU tracing, earlier experiments and ideas from
+For measurements, optional CPU/GPU tracing, earlier experiments and ideas from
 Ace Combat 5 and other PS2 projects, see [OPTIMIZATION.md](OPTIMIZATION.md).
 The ordinary GPU meter covers compute passes; the optional trace also measures
 the final display filter. Other projects' results do not establish an NFS speedup.

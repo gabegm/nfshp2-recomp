@@ -1,0 +1,175 @@
+--- a/host/profile.cpp
++++ b/host/profile.cpp
+@@ -14,4 +14,9 @@
+ #include <sys/time.h>
+ #include <ucontext.h>
++#include <pthread.h>
++#include <time.h>
++#include <unistd.h>
++#include <sys/syscall.h>
++#include <cstring>
+ 
+ namespace {
+@@ -26,4 +31,9 @@
+ std::uint64_t g_samples = 0, g_lost = 0;
+ std::uint64_t g_from = 0;
++clockid_t g_render_clock{};
++pid_t g_render_tid = 0;
++timer_t g_render_timer{};
++bool g_render_ready = false, g_render_timer_created = false;
++volatile sig_atomic_t g_render_requested = 0;
+ 
+ void sample(int, siginfo_t *, void *context) {
+@@ -36,7 +46,9 @@
+         return;
+     }
+-    const std::uintptr_t caller = *reinterpret_cast<const std::uintptr_t *>(uc->uc_mcontext.gregs[REG_RSP]);
+-    const std::uintptr_t coff = (caller - g_base) >> 4;
+-    if (caller >= g_base && coff < kSlots) ++g_caller_hits[coff];
++    if (!g_render_requested) {
++        const std::uintptr_t caller = *reinterpret_cast<const std::uintptr_t *>(uc->uc_mcontext.gregs[REG_RSP]);
++        const std::uintptr_t coff = (caller - g_base) >> 4;
++        if (caller >= g_base && coff < kSlots) ++g_caller_hits[coff];
++    }
+     const std::uintptr_t key = pc >> 4;
+     for (std::size_t i = 0, h = (key * 0x9E3779B97F4A7C15ull) >> 48; i < 64; ++i, h = (h + 1) & (kOutside - 1)) {
+@@ -60,4 +72,21 @@
+     sa.sa_flags = SA_SIGINFO | SA_RESTART;
+     sigaction(SIGPROF, &sa, nullptr);
++    if (g_render_requested) {
++        sigevent event{};
++        event.sigev_notify = SIGEV_THREAD_ID;
++        event.sigev_signo = SIGPROF;
++        event._sigev_un._tid = g_render_tid;
++        if (timer_create(g_render_clock, &event, &g_render_timer) != 0) {
++            std::perror("[profile] timer_create(render)");
++            return;
++        }
++        g_render_timer_created = true;
++        itimerspec timer{};
++        timer.it_interval.tv_nsec = 1000000;
++        timer.it_value.tv_nsec = 1000000;
++        if (timer_settime(g_render_timer, 0, &timer, nullptr) != 0) std::perror("[profile] timer_settime(render)");
++        std::fprintf(stderr, "[profile] render CPU clock: target thread %d, armed by thread %ld\n", g_render_tid, syscall(SYS_gettid));
++        return;
++    }
+     itimerval timer{};
+     timer.it_interval.tv_usec = 1000;
+@@ -68,5 +97,37 @@
+ }
+ 
++bool render_profile_requested() {
++    const char *value = std::getenv("PS2_PROFILE_RENDER");
++    return value && std::strcmp(value, "1") == 0;
++}
++
++void prepare_render_profile(bool threaded) {
++    if (!std::getenv("PS2_PROFILE") || !render_profile_requested()) return;
++    g_render_requested = 1;
++    if (!threaded) {
++        std::fprintf(stderr, "[profile] render CPU profiling requires a threaded window run\n");
++        return;
++    }
++    g_render_tid = static_cast<pid_t>(syscall(SYS_gettid));
++    g_render_ready = pthread_getcpuclockid(pthread_self(), &g_render_clock) == 0;
++    if (!g_render_ready) std::fprintf(stderr, "[profile] cannot obtain the rendering thread's CPU clock\n");
++}
++
++void finish_render_profile() {
++    if (!g_render_requested) return;
++    // This runs on the sampled thread after the emulation worker has joined.
++    // Block any pending notification before reading the hit counters.
++    sigset_t mask;
++    sigemptyset(&mask);
++    sigaddset(&mask, SIGPROF);
++    pthread_sigmask(SIG_BLOCK, &mask, nullptr);
++    if (const char *path = std::getenv("PS2_PROFILE")) write_profile(path);
++}
++
+ void start_profile(std::uint64_t from_frame) {
++    if (render_profile_requested() && !g_render_ready) {
++        std::fprintf(stderr, "[profile] render sampler unavailable; no process-wide fallback\n");
++        return;
++    }
+     dl_iterate_phdr(find_base, nullptr);
+     g_from = from_frame;
+@@ -83,9 +144,15 @@
+ 
+ void write_profile(const char *path) {
+-    itimerval timer{};
+-    setitimer(ITIMER_PROF, &timer, nullptr);
++    if (g_render_timer_created) {
++        timer_delete(g_render_timer);
++        g_render_timer_created = false;
++    } else if (!g_render_requested) {
++        itimerval timer{};
++        setitimer(ITIMER_PROF, &timer, nullptr);
++    }
+     std::FILE *f = std::fopen(path, "w");
+     if (!f) return;
+     std::fprintf(f, "# samples %llu lost %llu\n", static_cast<unsigned long long>(g_samples), static_cast<unsigned long long>(g_lost));
++    if (g_render_requested) std::fprintf(f, "# scope render-thread-cpu\n");
+     for (std::size_t i = 0; i < kSlots; ++i)
+         if (g_hits[i]) std::fprintf(f, "%zx %u\n", i << 4, g_hits[i]);
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -5,2 +5,8 @@
+ void start_profile(std::uint64_t from_frame);
+ void write_profile(const char *path);
++
++#if defined(__linux__) && defined(__x86_64__)
++bool render_profile_requested();
++void prepare_render_profile(bool threaded);
++void finish_render_profile();
++#endif
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -624,5 +624,9 @@
+         if (profile) start_profile(profile_from ? std::strtoull(profile_from, nullptr, 10) : 0);
+         const int result = ps2::run();
++#if defined(__linux__) && defined(__x86_64__)
++        if (profile && !render_profile_requested()) write_profile(profile);
++#else
+         if (profile) write_profile(profile);
++#endif
+         ps2::flush_memory_card();
+         if (ps2::replay_active()) return ps2::replay_status();
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -1,3 +1,6 @@
+ #include "window.hpp"
++#if defined(PS2_PROFILE) && defined(__linux__) && defined(__x86_64__)
++#include "profile.hpp"
++#endif
+ 
+ #include "ps2/system.hpp"
+@@ -1395,7 +1398,13 @@
+     if (!g_gpu_present && !create_renderer()) return 1;
+     const bool threads = !std::getenv("PS2_ONE_THREAD") && !std::getenv("PS2_TIME") && ps2::g_options.frames_dir.empty();
++#if defined(PS2_PROFILE) && defined(__linux__) && defined(__x86_64__)
++    prepare_render_profile(threads);
++#endif
+     if (!threads) {
+         ps2::g_options.on_vblank = on_vblank;
+         const int result = emulate();
++#if defined(PS2_PROFILE) && defined(__linux__) && defined(__x86_64__)
++        finish_render_profile();
++#endif
+         finish_audio();
+         return result;
+@@ -1469,4 +1478,7 @@
+     }
+     emulation.join();
++#if defined(PS2_PROFILE) && defined(__linux__) && defined(__x86_64__)
++    finish_render_profile();
++#endif
+     ps2::flush_memory_card();
+     finish_audio();
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -167,4 +167,5 @@
+     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+         target_sources(ps2run PRIVATE host/profile.cpp)
++        target_link_libraries(ps2run PRIVATE rt)
+         target_compile_definitions(ps2run PRIVATE PS2_PROFILE)
+     elseif(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")

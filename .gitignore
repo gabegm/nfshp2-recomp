@@ -26,6 +26,7 @@
 !/patches/raster-specialization.patch
 !/patches/racing-performance.patch
 !/patches/psmt4-sampling.patch
+!/patches/render-cpu-profile.patch
 !/patches/LICENSE.upstream
 
 # Never track disc images, including mixed-case extensions, in any directory.
