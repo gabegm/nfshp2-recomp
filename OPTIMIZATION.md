@@ -252,6 +252,59 @@ are updated. Unchanged sources keep their timestamps. Synthetic conflict,
 upgrade, repeat-build and symlink tests accompany this helper, and the real
 patch stack is checked against clean and previously patched source trees.
 
+## Refreshed race profiles and PSMT4 sampling
+
+The updated renderer was profiled again on 2026-10-30, using the existing
+frame-3000 checkpoint and a new private checkpoint at frame 4200. Holding
+Cross for the intervening 1200 guest frames produces a later road-curve view
+on the same track, following the initial pack and acceleration. This expands
+the sampled workload; it does not cover other tracks, dense police traffic,
+weather or every particle effect.
+
+The per-dispatch trace attributed 67.1% of measured GPU time to raster passes
+in the initial scene and 63.5% in the later one. Uploads and palette loads
+accounted for most of the rest. These are intrusive profiler shares, not a
+breakdown of ordinary frame time. Decoding the draw metadata showed that the
+dominant triangle states read PSMT4 (`0x14`) textures; the preceding sampler
+optimisation covered PSMT8 (`0x13`).
+
+The retained patch adds a direct bilinear path for undecoded standard PSMT4
+textures. It shares 128x128 page calculations between the four taps and uses
+the same nibble swizzle table, palette bank, colour expansion, snapshot reads,
+coordinate wrapping and interpolation. Predecoded textures and other formats
+keep their previous paths. Filtering quality and guest timing are unchanged.
+
+Alternating 600-frame runs on the initial checkpoint, discarding the first
+40-frame warm-up, gave:
+
+| Configuration | First run | Repeated run |
+|---|---:|---:|
+| Previous renderer | 46.47 fps | 46.52 fps |
+| Direct PSMT4 sampler | 48.49 fps | 48.42 fps |
+
+That is another roughly 4% improvement in this workload. The busier initial
+240-frame sample measured 43.90/43.94 fps before and 46.01/45.29 afterwards.
+A 600-frame run from the later checkpoint measured 58.57 versus 59.09 fps;
+that lighter scene was already close to the guest's full-speed rate. These
+results do not establish full-speed racing throughout the game.
+
+The final native launcher check measured 46.72 versus 48.62 fps over the same
+561 retained early-race frames. Standard and widescreen launch checks passed.
+
+Other experiments were discarded: moving bounding-box or triangle rejection
+ahead of setup loading, reducing redundant palette copies/barriers, and a
+guarded 24-bit depth-write path did not show a clear enough overall gain.
+The experimental C++ changes were restored, and the pre-patch binary matched
+the archived baseline byte for byte before testing the retained shader path.
+
+Validation compares the built-in shader against archived standard/widescreen
+binaries for a 600-frame initial race, 120-frame later race and menu samples,
+widescreen and 2x race samples. Images, guest memory and audio are checked,
+including profiling mode. Captures, checkpoints and detailed traces remain
+private. The generic shader with texture predecode enabled also matched the
+archived renderer. The same patch-stack staging helper handles fresh builds, upgrades
+and repeat builds; no additional launch arguments are required.
+
 ## Reuse and repository policy
 
 PS2 Web Recomp and this runtime use MIT licensing; PS2Recomp and the cited God

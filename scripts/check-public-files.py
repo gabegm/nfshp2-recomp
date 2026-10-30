@@ -12,6 +12,7 @@ allowed = {
     'patches/graphics-profiling.patch',
     'patches/raster-specialization.patch',
     'patches/racing-performance.patch',
+    'patches/psmt4-sampling.patch',
     'scripts/apply-runtime-patches.py',
     'tests/test_runtime_patches.py',
     'scripts/fetch-widescreen.py',

@@ -1,0 +1,36 @@
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -633,4 +633,13 @@
+ }
+ 
++// PSMT4 uses 128x128 pages with table entries measured in nibbles.
++fn tap4(s: Setup, page: u32, n: u32, k: u32) -> u32 {
++    let a = page + (n >> 1u);
++    let raw = load_texel(Loc((a & 0x3FFFFFu) >> 2u, (a & 3u) * 8u + (n & 1u) * 4u, 0xFu), k);
++    let e = clut[s.clut * CLUT_ENTRIES + (s.csa & 15u) * 16u + raw];
++    if (s.cpsm == PSMCT32 || s.cpsm == PSMCT24) { return e; }
++    return expand16(e, s);
++}
++
+ fn sample(s: Setup, uin: f32, vin: f32, k: u32) -> u32 {
+     if (!has(s, F_BILINEAR)) {
+@@ -645,4 +654,19 @@
+     let ya = texel_y(s, y0);
+     let yb = texel_y(s, y0 + 1);
++    if (s.dec == 0xFFFFFFFFu && s.tpsm == 0x14u) {
++        let pxa = (xa >> 7u) * 8192u + s.tf.base;
++        let pxb = (xb >> 7u) * 8192u + s.tf.base;
++        let pya = (ya >> 7u) * s.tf.per_row * 8192u;
++        let pyb = (yb >> 7u) * s.tf.per_row * 8192u;
++        let nxa = xa & 127u;
++        let nxb = xb & 127u;
++        let nya = (ya & 127u) * 128u;
++        let nyb = (yb & 127u) * 128u;
++        return blend4(tap4(s, pxa + pya, tables[T_OFF4 + nxa + nya], k),
++                      tap4(s, pxb + pya, tables[T_OFF4 + nxb + nya], k),
++                      tap4(s, pxa + pyb, tables[T_OFF4 + nxa + nyb], k),
++                      tap4(s, pxb + pyb, tables[T_OFF4 + nxb + nyb], k),
++                      u - f32(x0), v - f32(y0));
++    }
+     if (s.dec == 0xFFFFFFFFu && s.tpsm == 0x13u) {
+         let pxa = (xa >> 7u) * 8192u + s.tf.base;

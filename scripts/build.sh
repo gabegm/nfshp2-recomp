@@ -51,7 +51,8 @@ python3 "$root/scripts/apply-runtime-patches.py" "$upstream" \
   "$root/patches/presentation-performance.patch" \
   "$root/patches/graphics-profiling.patch" \
   "$root/patches/raster-specialization.patch" \
-  "$root/patches/racing-performance.patch"
+  "$root/patches/racing-performance.patch" \
+  "$root/patches/psmt4-sampling.patch"
 if [ "$wide" = 1 ]; then
   wide_patch=$(python3 "$root/scripts/fetch-widescreen.py" "$image")
   port_args+=(--widescreen --pnach "$wide_patch" --pnach-section 'Widescreen 16:9' --pnach-section 'HUD fixed for widescreen')

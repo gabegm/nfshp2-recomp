@@ -97,15 +97,16 @@ specialisations, and uses the cheaper Crisp display filter. The shader changes
 preserve texture filtering, depth checks, blending, draw order and PS2 timing.
 The final enlarged picture has fewer enhancements than the default display filter.
 
-The latest AC-powered checkpoint comparisons against the previous preset gave:
+The latest AC-powered comparisons before and after the 4-bit sampler gave:
 
 | Scene | Previous preset | Current preset |
 |---|---:|---:|
-| Main menu | 57.6 fps | 59.5 fps |
-| Coastal Parklands, longer race segment | 44.8–45.3 fps | 46.7–47.3 fps |
+| Coastal Parklands, early 600-frame segment | 46.47–46.72 fps | 48.42–48.62 fps |
+| Later 600-frame segment | 58.57 fps | 59.09 fps |
 
-The racing gain is about 4% in the same longer segment. A shorter race segment
-improved from roughly 42 to 44 fps; different segments have different costs.
+The early-segment gain is about 4%. Its busier initial 240-frame sample
+improved from about 43.9 to 45.3–46.0 fps; different segments have different
+costs. The final menu sample measured about 59.7 fps.
 Results vary with the scene, power limits and background load. These are
 emulated video frames; the game may draw a new picture every other frame.
 The tested US disc needs 60 video frames/s for full speed, so racing remains
@@ -113,8 +114,8 @@ slow motion with stretched audio. Disabling stretching produces audio gaps
 rather than restoring speed. Full-speed play and full-game compatibility
 remain unverified.
 
-The racing patch specialises one matching large-triangle state and shares
-address calculations across bilinear samples of indexed 8-bit textures.
+The racing patches specialise one matching large-triangle state and share
+address calculations across bilinear samples of indexed 4-bit and 8-bit textures.
 Other shader states retain their existing paths. `PS2_RACE_SPECIALIZE=0`
 disables the racing-state specialisation while retaining the texture sampler
 improvement. `PS2_RASTER_SPECIALIZE=0` disables both menu and racing state
@@ -135,7 +136,7 @@ not required. Existing builds need rebuilding once to install new runtime
 patches. The build validates overlapping patches privately before updating
 source files, so existing installations can upgrade safely.
 
-Menu, race, widescreen and 2x race checks compare raw rendered frames, guest
+Menu, early/later race, widescreen and 2x race checks compare raw rendered frames, guest
 memory and audio against the previous renderer. All sampled outputs matched
 byte for byte. Those checks cover the sampled scenes, not every track or effect.
 
