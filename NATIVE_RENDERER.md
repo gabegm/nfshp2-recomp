@@ -87,3 +87,41 @@ These results show no measured regression and do not establish a speedup.
 The next stages are to identify the dominant entry's input layouts and mode
 flags, correlate them with game-side submission functions, and implement one
 recognized rendering path with the original renderer as its fallback.
+
+## Private Ghidra analysis
+
+The optional setup uses official [Ghidra 12.1.4](https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.1.4_build)
+and the matching [Emotion Engine extension v2.1.39](https://github.com/chaoticgd/ghidra-emotionengine-reloaded/releases/tag/v2.1.39).
+Both download URLs and SHA256 hashes are pinned. Tools and archives stay in
+`.local/tools`; no binaries are redistributed. This version works with the
+machine's existing 64-bit JDK 21. The headless workflow was tested on Linux.
+
+```sh
+python3 scripts/setup-ghidra.py
+python3 scripts/analyze-renderer.py
+```
+
+The analysis helper requires the verified original US executable already used
+by the build. It reads the global pointer from ELF `.reginfo` and locates
+`.vutext` instead of embedding guessed addresses. `SetPs2Gp.java` applies GP
+before analysis; without it, GP-relative globals can remain unresolved in the
+decompiler. `ExportVuReferences.java` writes references, containing functions,
+disassembly and decompilation to private notes. Additional discovered data
+ranges can be followed with `--reference-range START_HEX END_HEX`.
+
+Notes live in `.local/renderer-analysis`. Ghidra rejects project paths with a
+component beginning with a dot, so the actual project is created in a temporary
+non-dot directory. Its path is recorded in `project-path.txt` and `metadata.json`.
+Archive that directory privately if it must survive temporary-directory cleanup.
+The Java preferences/home override also stays in `.local`.
+
+In the initial analysis, two functions referenced the VU code area. Following
+a discovered renderer command-buffer pointer identified 55 containing functions.
+Those are candidates for inspection, not 55 proven track-drawing functions.
+The PS2 extension analyzes the main Emotion Engine CPU; this workflow does not
+claim that ordinary CPU decompilation reconstructs VU microcode or original
+model formats automatically. DVP overlay-loader warnings remain in the private
+log and limit conclusions about those overlay sections.
+
+Synthetic tests validate ELF bounds/metadata and safe archive extraction,
+including restoration of executable permissions. No game data is used by them.

@@ -15,6 +15,10 @@
 !/scripts/nointro.py
 !/scripts/apply-runtime-patches.py
 !/scripts/analyze-vu-census.py
+!/scripts/setup-ghidra.py
+!/scripts/analyze-renderer.py
+!/scripts/SetPs2Gp.java
+!/scripts/ExportVuReferences.java
 !/tests/
 /tests/*
 !/tests/test_widescreen.py
@@ -22,6 +26,7 @@
 !/tests/test_runtime_patches.py
 !/tests/test_upload_cache.py
 !/tests/test_vu_census.py
+!/tests/test_ghidra_tools.py
 !/patches/
 /patches/*
 !/patches/runtime-compatibility.patch
