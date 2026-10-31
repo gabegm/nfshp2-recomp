@@ -76,3 +76,5 @@
 !/tests/test_native_coverage.py
 
 !/scripts/build-native-coverage.py
+
+!/patches/native-rejection-profile.patch

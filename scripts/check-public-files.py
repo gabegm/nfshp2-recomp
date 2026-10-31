@@ -20,6 +20,7 @@ allowed = {
     'scripts/analyze-native-coverage.py',
     'tests/test_native_coverage.py',
     'scripts/build-native-coverage.py',
+    'patches/native-rejection-profile.patch',
     '.gitignore', '.gitattributes', 'README.md', 'LICENSE', 'scripts/build.sh',
     'scripts/check-public-files.py',
     'scripts/play.sh', 'patches/runtime-compatibility.patch',

@@ -1,0 +1,86 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -129,6 +129,7 @@
+ }();
+ struct NativeCoverage {
+     std::uint64_t eligible = 0, bbox = 0, eligible_bbox = 0;
++    std::vector<std::pair<std::uint32_t,std::uint64_t>> reasons;
+ };
+ #else
+ #endif
+@@ -1034,6 +1035,9 @@
+                 if (g_native_coverage) {
+                     const auto &coverage=g_command_info[info].native;
+                     std::fprintf(g_profile_out," native %llu %llu %llu",static_cast<unsigned long long>(coverage.eligible),static_cast<unsigned long long>(coverage.bbox),static_cast<unsigned long long>(coverage.eligible_bbox));
++                    std::fprintf(g_profile_out," reasons");
++                    for (const auto &reason : coverage.reasons)
++                        std::fprintf(g_profile_out," %u:%llu",reason.first,static_cast<unsigned long long>(reason.second));
+                 }
+             }
+ #else
+@@ -2105,6 +2109,46 @@
+     return true;
+ }
+ #ifdef PS2_NATIVE_COVERAGE_DIAGNOSTIC
++// Descriptive conditions, not replacement guards: admission still uses the
++// production native_triangle_input. Multiple simultaneous blockers are retained.
++std::uint32_t native_rejection_mask(const State &st,const Vertex *v,int count,const std::uint32_t *s) {
++    std::uint32_t mask=0;
++    const auto attr=(st.prmodecont&1u)?st.prim:((st.prim&7u)|(st.prmode&~7ull));
++    const bool triangle=count==3 && (attr&7u)>=3 && (attr&7u)<=5;
++    if (!triangle) mask|=1u<<0;
++    if (s[3]!=0 || s[4]!=0) mask|=1u<<1;
++    if (s[6]!=0x31 || s[23]!=0xffffff) mask|=1u<<2;
++    const auto alpha=(s[7]>>12)&255;
++    if ((s[0]&8u) && ((alpha&3)!=((alpha>>2)&3) || ((alpha>>6)&3)!=0)) mask|=1u<<3;
++    if (!(s[0]&2048u) || (s[0]&(4u|128u|4096u)) || ((s[7]>>28)&3)) mask|=1u<<4;
++    if ((s[0]&64u) && ((s[7]>>4)&3)) mask|=1u<<5;
++    bool texture_format=true;
++    switch(s[14]) {case 0:case 1:case 2:case 10:case 0x13:case 0x14:case 0x1b:case 0x24:case 0x2c:case 0x30:case 0x31:case 0x32:case 0x3a:break;default:texture_format=false;}
++    if (!(s[0]&2u) || ((s[7]>>24)&3)>1 || ((s[7]>>26)&3)>1 || (s[15]&255)>10 || (s[15]>>8)>10 || !texture_format) mask|=1u<<6;
++    const auto width=std::uint64_t(s[2])*64,height=std::uint64_t(s[11]>>16)+1;
++    const bool dimensions=width && width<=2048 && height<=2048 && width*height<=(1u<<20);
++    if (!dimensions || (s[10]&65535) || (s[11]&65535) || (s[10]>>16)!=width-1) mask|=1u<<7;
++    if (dimensions) {
++        const auto interval=[&](unsigned i,std::uint64_t w,std::uint64_t h,std::uint64_t &lo,std::uint64_t &hi) {
++            const auto px=s[i+3]&15,py=(s[i+3]>>4)&15;
++            if(!px || px>7 || !py || py>7)return false;
++            lo=s[i];hi=lo+(((w-1)>>px)+((h-1)>>py)*s[i+1]+1)*8192;
++            return hi<=(4u<<20);
++        };
++        std::uint64_t flo=0,fhi=0,zlo=0,zhi=0,tlo=0,thi=0;
++        const bool surfaces=interval(30,width,height,flo,fhi) && interval(35,width,height,zlo,zhi);
++        if (!surfaces || (flo<zhi && zlo<fhi)) mask|=1u<<8;
++        if ((s[0]&2u) && (s[15]&255)<=10 && (s[15]>>8)<=10) {
++            if (!interval(25,1u<<(s[15]&255),1u<<(s[15]>>8),tlo,thi) ||
++                (surfaces && ((tlo<fhi && flo<thi)||(tlo<zhi && zlo<thi)))) mask|=1u<<8;
++        }
++    }
++    if (triangle) for (int i=0;i<count;++i)
++        if (v[i].z>0xffffffu || !std::isfinite(v[i].s) || !std::isfinite(v[i].t) || !std::isfinite(v[i].q) ||
++            (!(s[0]&16u) && !(v[i].q>0))) mask|=1u<<9;
++    if (g_mode!=Mode::primary || g_scale!=1 || !os::env("PS2_GS_SHADER").empty() || !os::env("PS2_GPU_SKIP").empty() || !os::env("PS2_GPU_BENCH").empty()) mask|=1u<<10;
++    return mask;
++}
+ #if defined(_MSC_VER)
+ __declspec(noinline)
+ #elif defined(__GNUC__) || defined(__clang__)
+@@ -2116,10 +2160,17 @@
+     const auto bbox=width*height;
+     g_native_batch_coverage.bbox+=bbox;
+     std::uint32_t setup[kSetupWords]={};native_target::Vertex input[3];
++    std::uint32_t reason=0;
+     if (native_triangle_input(st,vertices,count,setup,input)) {
+         ++g_native_batch_coverage.eligible;
+         g_native_batch_coverage.eligible_bbox+=bbox;
+-    }
++    } else {
++        reason=native_rejection_mask(st,vertices,count,setup);
++        if (!reason) reason=1u<<11; // residual guard/layout/geometry restriction
++    }
++    for (auto &entry : g_native_batch_coverage.reasons)
++        if (entry.first==reason) {++entry.second;return;}
++    g_native_batch_coverage.reasons.push_back({reason,1});
+ }
+ #else
+ #endif

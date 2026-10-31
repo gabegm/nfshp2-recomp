@@ -537,3 +537,40 @@ and full save states against archived binaries across the 600-frame early race,
 120-frame later/menu/widescreen samples, and 24-frame 2x/predecode samples.
 Synthetic tests check timing bounds, malformed metadata and the actual runtime
 accumulator, including areas greater than 32 bits.
+
+## Simultaneous rejection conditions
+
+`native-rejection-profile.patch` extends the separate diagnostic runner with
+per-batch histograms. After the existing coverage fields it writes `reasons`
+and `mask:primitive-count` entries. Mask zero is reserved for primitives the
+actual production guard accepts. Rejected primitives retain multiple descriptive
+conditions rather than being assigned only the first failed check.
+
+Bits 0–11 describe geometry, colour format/mask, depth format, destination
+blending, raster features, alpha failure, texture mode, scissor/size,
+surface overlap/wrapping, vertex depth/Q, configuration and residual conditions.
+The classifier does not replace the native admission guard or enable rendering.
+Its residual category catches otherwise unexplained rejection; the masks are
+not a proof that every unreported requirement would be met by a new backend.
+
+Rebuild with `scripts/build-native-coverage.py` and use the same profile commands
+above. The analyzer accepts the earlier format too. It checks that histogram
+counts sum to all primitives and that mask zero equals the accepted count.
+It attributes time to a mask only when every primitive in the dispatch shares
+that mask. Heterogeneous dispatch time remains separate; conditions occurring
+together are never counted as independent, additive speedups.
+
+In the early 120-vblank sample, homogeneous dispatches with destination blending
+as their sole reported condition accounted for 14.7% of raster time; depth
+format alone accounted for 4.6%. Combined depth/blending conditions accounted
+for 8.3%, while colour/depth/raster-feature combinations accounted for 7.9%.
+About 25.2% of raster time remained in dispatches with heterogeneous masks.
+Later and widescreen samples likewise contained many combined restrictions.
+The menu's depth-plus-blending group accounted for about 61% of its raster time.
+These are intrusive profiler shares, not estimated racing gains.
+
+This diagnostic retained matching images, RAM, audio and full save states in
+all six existing scenarios. Normal binaries continue to match the archived
+pre-instrumentation executables exactly. Synthetic tests cover simultaneous
+conditions, histogram consistency, non-additive timing attribution, the actual
+runtime classifier and accumulator. The unit suite has 60 passing tests.

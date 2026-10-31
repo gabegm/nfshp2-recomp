@@ -216,3 +216,22 @@ for this investigation.
 Hardware replacement and speculative CPU/VU/IOP rewrites are lower priorities
 unless new measurements identify a limit there. The successful PCSX2 test does
 not remove the need to test our own implementation for correctness and speed.
+
+### Rejection inventory result
+
+The diagnostic now records simultaneous descriptive conditions per primitive.
+Only dispatches whose primitives all share one mask receive time for that
+combination; heterogeneous dispatch time is kept separate. In the early-race
+sample, destination blending as the sole reported condition accounts for 14.7%
+of measured raster time, depth format alone 4.6%, combined depth/blending 8.3%,
+and colour/depth/raster-feature combinations 7.9%. Heterogeneous masks account
+for another 25.2%. These conditions do not prove a proposed implementation
+would satisfy all guards or accelerate the corresponding time.
+
+The result lowers the priority of a depth-only extension as a standalone fix.
+A small batching experiment is also justified: a full-screen untextured fill
+can share a GS batch with textured triangles, preventing uniform-kind/flag
+specialization. Test a guarded separation of that fill before committing to
+more rendering features. Required evidence remains byte-exact GS output and a
+repeatable whole-race improvement; reject the experiment if it only reduces
+profiled command cost or moves work elsewhere.

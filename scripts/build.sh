@@ -62,7 +62,8 @@ python3 "$root/scripts/apply-runtime-patches.py" "$upstream" \
   "$root/patches/native-target-bridge.patch" \
   "$root/patches/native-triangle.patch" \
   "$root/patches/native-batch.patch" \
-  "$root/patches/native-coverage.patch"
+  "$root/patches/native-coverage.patch" \
+  "$root/patches/native-rejection-profile.patch"
 # Install the hand-written shared bridge without rebuilding on unchanged copies.
 bridge_header="$upstream/runtime/src/gs/gpu/native_target_bridge.hpp"
 if ! cmp -s "$root/tools/native_target_bridge.hpp" "$bridge_header"; then
