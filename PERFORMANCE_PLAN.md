@@ -7,9 +7,11 @@ renderer; the experimental native renderer has no demonstrated racing FPS win.
 
 ## Milestone 1: reproducible baseline (completed)
 
-The earlier SDL window-creation stall no longer reproduces in this desktop
-session. A minimal SDL probe and real windowed game runs both succeed. Its
-cause remains unproven; no speculative startup workaround was installed.
+SDL window creation intermittently stalls before GPU/audio initialization,
+including in a standalone SDL probe. Recent probes and windowed benchmarks
+succeeded when launched with a TTY; this is an observation, not a proven cause
+or fix. No speculative startup workaround was installed. Incomplete runs are
+excluded from performance results.
 
 `scripts/benchmark-performance.py` runs a private checkpoint with the established
 performance preset, fixed input/RTC and a real window, Vulkan GPU and audio
@@ -235,3 +237,45 @@ specialization. Test a guarded separation of that fill before committing to
 more rendering features. Required evidence remains byte-exact GS output and a
 repeatable whole-race improvement; reject the experiment if it only reduces
 profiled command cost or moves work elsewhere.
+
+
+### Follow-up experiments: no retained racing speedup
+
+Three private experiments were evaluated after the rejection inventory:
+
+| Experiment | Result | Decision |
+|---|---|---|
+| Split large untextured fills from following textured geometry, with uniform raster specialization | Early race about 1.5% slower; specialization alone gained under 1% early/later but lost about 0.8% widescreen | Rejected |
+| Skip uploads whose byte-verified source content is already resident in unchanged destination pages | Only 136 of 136,960 early-race requests skipped; GPU upload dispatch count unchanged | Rejected before FPS benchmarking |
+| Pack aligned full-page PSMT4 uploads into one store per physical word | Two implementations produced no repeatable early-race speedup in alternating runs | Rejected |
+
+Each experiment passed the six-scene image/audio/RAM/full-state comparison
+suite while enabled. This validates the exercised cases, not every possible GS
+state. The installed normal and widescreen binaries have been restored and are
+byte-identical to the archived reference. All 60 tests and fresh/upgrade/repeat
+patch-stack checks pass. Discarded implementations and game-derived validation
+artifacts remain private; no experimental options were added to public play.
+
+### Next milestone: hardware GS backend feasibility
+
+Investigate an isolated graphics backend before attempting another small upload
+optimization. Play!'s desktop Vulkan implementation is a concrete candidate:
+its [device setup](https://github.com/jpd002/Play-/blob/master/Source/gs/GSH_Vulkan/GSH_Vulkan.cpp)
+requires fragment pixel interlock and 8/16-bit shader/storage features. A local
+hardware Vulkan query confirms these features on this UHD 620. Feature support
+is a feasibility check, not a performance result.
+
+Its [GS handler](https://github.com/jpd002/Play-/blob/master/Source/gs/GSH_Vulkan/GSH_Vulkan.h)
+exposes register processing, transfers, VRAM access and presentation, but is not
+an interchangeable implementation of our runtime's draw API. Its
+[desktop drawing implementation](https://github.com/jpd002/Play-/blob/master/Source/gs/GSH_Vulkan/GSH_VulkanDrawDesktop.cpp)
+uses graphics rasterization with shader-managed GS memory. The candidate would
+retain statically recompiled game CPU code and replace graphics handling only.
+
+Before integration: pin upstream revisions; inspect licenses of all dependencies
+(the [top-level license](https://github.com/jpd002/Play-/blob/master/License.txt)
+permits reuse with retained notices); build a standalone synthetic GS smoke
+test; then map ordered registers/transfers, private display registers, readback,
+save-state synchronization and SDL presentation. Test on hardware and benchmark
+whole racing segments before selecting it. No backend code has been imported,
+and neither compatibility nor improved racing performance is established.

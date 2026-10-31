@@ -490,3 +490,29 @@ and experiment ideas, and imports no code from those projects.
 
 Keep traces, captures, game-derived source, modules, executables and checkpoints
 local. The public repository contains setup code and documentation only.
+
+
+## Rejected fill and upload experiments (2026-10-31)
+
+Reported rates below are guest vblanks per wall second at a 60 Hz target,
+measured in alternating off/on/on/off runs of the same private binary.
+
+- Fill separation plus large uniform raster specialization: early off
+  50.006/50.688, on 49.457/49.724. Specialization alone repeated a small early
+  gain (50.391/50.307 versus 50.704/50.891; repeat 50.151/50.306 versus
+  50.584/50.702), but widescreen regressed from 51.001/50.627 to
+  50.429/50.423. This is not a general racing improvement.
+- Resident upload suppression: byte-verified source identity plus conservative
+  destination invalidation skipped about 0.1% of early upload requests and did
+  not reduce upload dispatches. Menu reuse was greater, but racing remained the
+  objective. No FPS gain was measured or claimed.
+- Full-page packed PSMT4 upload: the first implementation measured early off
+  50.696/50.607 versus on 50.692/50.651. A separate shader implementation
+  measured off 50.495/50.048 versus on 50.342/50.299. The eligible full-page
+  case covered only about 6.5% of upload invocation work in the diagnostic
+  sample. Neither implementation established a repeatable gain.
+
+All three passed the six-scene differential checks when enabled, but none was
+retained in the public patch stack or installed play binaries. Their private
+results prevent repeating these approaches without a new hypothesis. The next
+hardware graphics backend feasibility milestone is in PERFORMANCE_PLAN.md.
