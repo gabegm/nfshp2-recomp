@@ -66,3 +66,7 @@
 
 !/patches/native-batch.patch
 !/tests/test_native_batch.py
+
+!/PERFORMANCE_PLAN.md
+!/scripts/benchmark-performance.py
+!/tests/test_performance_benchmark.py

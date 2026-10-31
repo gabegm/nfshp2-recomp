@@ -159,6 +159,9 @@ python3 -m unittest discover -s tests
 The upload-cache test uses synthetic data and a C++17 compiler to exercise the
 installed runtime code. It skips if the private checkout or compiler is absent.
 
+For the current performance targets, reproducible benchmark runner and next
+milestones, see [PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md).
+
 For measurements, optional CPU/GPU tracing, earlier experiments and ideas from
 Ace Combat 5 and other PS2 projects, see [OPTIMIZATION.md](OPTIMIZATION.md).
 The ordinary GPU meter covers compute passes; the optional trace also measures
