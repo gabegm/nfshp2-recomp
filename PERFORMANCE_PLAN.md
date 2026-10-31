@@ -167,7 +167,14 @@ benchmark or a replacement for profiling this runtime. This machine has the
 Flatpak PCSX2 v2.8.2 installed. The inspected global settings use 1x resolution,
 a 100% normal-speed target, and no widescreen patches; performance overlays
 are off. Per-game settings can override globals, so verify effective settings
-in a running game. No PCSX2 racing result has been recorded yet.
+in a running game.
+
+On 2026-10-31 the user reported that PCSX2 never dropped below 100% speed while
+racing, including after switching to Vulkan. This is a successful same-machine
+control: the laptop can run this game at full speed through another
+implementation. The exact race duration and effective per-game settings were
+not logged by our benchmark runner; this is the user's observed racing result,
+not an automated frame-for-frame comparison.
 
 Use the same lawfully owned US disc, AC power, Vulkan hardware rendering,
 1x resolution, original guest clocks, normal 100% speed, and no optional game
@@ -178,14 +185,34 @@ then repeat two-minute racing segments without running the recomp alongside.
 Record speed percentage, image pacing/audio and available EE/GS performance
 readings. Do not equate the game's image FPS with emulation speed.
 
-If PCSX2 sustains 100% where this runtime runs at about 85%, that establishes
-that another implementation can run the game at full speed on this machine;
-it does not prove which subsystem or code change will fix this runtime. If
-both slow down, investigate their CPU/GPU/presentation costs, effective settings
-and sustained thermal behaviour before concluding the hardware is insufficient.
+PCSX2's full-speed result, alongside this runtime's roughly 85% early-race
+speed, makes implementation efficiency the primary investigation. Vulkan alone
+is not the fix: both paths can use Vulkan while submitting very different work.
+Our compute-dispatch traces still identify rasterization and memory traffic as
+large costs. This does not isolate a single cause or establish that CPU-side
+submission costs cannot also matter.
 Save states are implementation-specific, so the recomp's checkpoints cannot
 supply an identical PCSX2 starting state. Record this comparability limit.
 Keep BIOS files, ROMs, emulator logs, saves and any captures private. For an
 isolated future test profile, PCSX2's [documented `-datapath` option](https://github.com/PCSX2/pcsx2/blob/v2.8.2/pcsx2-qt/QtHost.cpp)
 selects a separate application data directory; no global settings were edited
 for this investigation.
+
+
+### Priority after the successful PCSX2 control
+
+1. Inventory the rejection causes in the expensive racing states, especially
+   16-bit depth/colour targets and destination blending. The current native
+   guard accepts roughly half the primitives but fully eligible batches cover
+   only about 19% of early-race raster time. Do not mistake that primitive count
+   for enough native coverage to deliver full speed.
+2. Combine useful native coverage with persistent GPU attachments and coherent
+   texture/palette reuse. Avoid per-triangle CPU readbacks or full-frame
+   transfers at every material change. Keep the GS fallback correct.
+3. Measure an enabled native path against the GS reference over whole racing
+   segments, including pacing and audio. Only retain performance claims supported
+   by alternating runs; fewer draws alone are not a racing speedup.
+
+Hardware replacement and speculative CPU/VU/IOP rewrites are lower priorities
+unless new measurements identify a limit there. The successful PCSX2 test does
+not remove the need to test our own implementation for correctness and speed.
