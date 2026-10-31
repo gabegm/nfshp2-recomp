@@ -15,3 +15,7 @@ echo "Built $root/.local/native-preview/native-mesh-preview"
   "$root/tools/native_target_bridge_test.cpp" -L "$wgpu/lib" -Wl,-rpath,"$wgpu/lib" \
   -lwgpu_native -ldl -lpthread -lm -o "$root/.local/native-preview/native-target-bridge-test"
 echo "Built $root/.local/native-preview/native-target-bridge-test"
+"${CXX:-c++}" -std=c++17 -O2 -Wall -Wextra -I "$wgpu/include" \
+  "$root/tools/native_triangle_test.cpp" -L "$wgpu/lib" -Wl,-rpath,"$wgpu/lib" \
+  -lwgpu_native -ldl -lpthread -lm -o "$root/.local/native-preview/native-triangle-test"
+echo "Built $root/.local/native-preview/native-triangle-test"

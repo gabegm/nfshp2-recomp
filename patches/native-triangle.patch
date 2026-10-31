@@ -1,0 +1,92 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -1,5 +1,6 @@
+ #include "gpu.hpp"
+ #include "native_target_bridge.hpp"
++#include "native_triangle.hpp"
+ #include "ps2/hitch.hpp"
+ #include "ps2/os.hpp"
+ #include "ps2/system.hpp"
+@@ -2033,6 +2034,73 @@
+     }
+     wgpuCommandEncoderRelease(encoder);
+ }
++// One explicitly selected research triangle; all other draws use the GS path.
++#if defined(_MSC_VER)
++__declspec(noinline)
++#elif defined(__GNUC__) || defined(__clang__)
++__attribute__((noinline))
++#endif
++bool native_triangle_draw(const State &st, const Vertex *vertices, int count) {
++    static const std::string spec = os::env("PS2_NATIVE_TRIANGLE");
++    static unsigned long long ordinal = 0;
++    static bool finished = false;
++    unsigned long long frame = 0, draw = 0;
++    if (finished || std::sscanf(spec.c_str(), "%llu,%llu", &frame, &draw) != 2 || frame_count() != frame || ordinal++ != draw) return false;
++    finished = true;
++    const auto attr = (st.prmodecont & 1u) ? st.prim : ((st.prim & 7u) | (st.prmode & ~7ull));
++    const auto prim = attr & 7u;
++    std::uint32_t setup[kSetupWords] = {};
++    make_setup(st, attr, setup);
++    const auto reject = [] { std::fprintf(stderr, "[native-triangle] unsupported draw; retained GS rendering\n"); return false; };
++    if (g_scale != 1 || !os::env("PS2_GS_SHADER").empty() || !os::env("PS2_GPU_SKIP").empty() || !os::env("PS2_GPU_BENCH").empty() || count != 3 || prim < 3 || prim > 5 || !native_target::Triangle::supported(setup)) return reject();
++    const auto &context = st.ctx[(attr >> 9) & 1u];
++    const float ox = static_cast<float>(context.xyoffset & 65535u), oy = static_cast<float>((context.xyoffset >> 32) & 65535u);
++    const auto width = 1u << (setup[15] & 255u), height = 1u << (setup[15] >> 8);
++    native_target::Vertex input[3];
++    for (int i = 0; i < 3; ++i) {
++        const auto &v = vertices[i];
++        const auto &colour = (setup[0] & 1u) ? v : vertices[2];
++        if ((!(setup[0] & 16u) && !(v.q > 0)) || v.z > 0xffffffu || !std::isfinite(v.s) || !std::isfinite(v.t) || !std::isfinite(v.q)) return reject();
++        input[i] = {(static_cast<float>(v.x)-ox)/16, (static_cast<float>(v.y)-oy)/16,
++                    colour.r/255.0f,colour.g/255.0f,colour.b/255.0f,colour.a/255.0f,
++                    v.s,v.t,v.q,static_cast<float>(v.z)};
++        if (setup[0] & 16u) {input[i].s=v.u/(16.0f*width);input[i].t=v.v/(16.0f*height);input[i].q=1;}
++    }
++    const auto &a=input[0], &b=input[1], &c=input[2];
++    const auto area=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
++    if (!std::isfinite(area) || std::abs(area)<1e-8f) return reject();
++    flush_all();submit();
++    static native_target::Bridge bridge;
++    static native_target::Triangle triangle;
++    if (!bridge.init(g_device) || !triangle.prepare(g_device,width,height)) return reject();
++    const auto setup_offset=arena_append(setup,sizeof setup);
++    const auto params=push_params({setup_offset,0,width*height});
++    ensure_capacity();
++    wgpuQueueWriteBuffer(g_queue,g_data,0,g_arena.data(),g_arena.size()*4);
++    wgpuQueueWriteBuffer(g_queue,g_params,0,g_param_records.data(),g_param_records.size()*kParamStride);
++    auto group=make_group(g_params,g_data,triangle.decoded());
++    auto encoder=wgpuDeviceCreateCommandEncoder(g_device,nullptr);
++    auto pass=wgpuCommandEncoderBeginComputePass(encoder,nullptr);
++    wgpuComputePassEncoderSetPipeline(pass,g_pipelines[kDecode]);
++    const std::uint32_t offset=params*kParamStride;
++    wgpuComputePassEncoderSetBindGroup(pass,0,group,1,&offset);
++    const auto groups=(width*height+63u)/64u;
++    wgpuComputePassEncoderDispatchWorkgroups(pass,std::min(groups,1024u),(groups+1023u)/1024u,1);
++    wgpuComputePassEncoderEnd(pass);wgpuComputePassEncoderRelease(pass);
++    const bool begun=bridge.begin(g_queue,encoder,g_vram,g_tables,setup);
++    const bool drawn=begun && triangle.encode(g_queue,encoder,bridge,input,setup);
++    if (drawn) bridge.finish(encoder,g_vram,g_tables);
++    auto command=wgpuCommandEncoderFinish(encoder,nullptr);
++    wgpuQueueSubmit(g_queue,1,&command);
++    wgpuCommandBufferRelease(command);wgpuCommandEncoderRelease(encoder);wgpuBindGroupRelease(group);
++    g_arena.clear();g_param_records.clear();
++    if (!drawn) return reject();
++    const int right=static_cast<int>(setup[2]*64)-1, bottom=static_cast<int>(setup[11]>>16);
++    mark_rendered(pages(setup[1],setup[2],setup[3],0,0,right,bottom));
++    if ((setup[0]&512u) && !(setup[0]&32u)) mark_rendered(pages(setup[5],setup[2],setup[6],0,0,right,bottom));
++    std::fprintf(stderr,"[native-triangle] replaced draw %llu of frame %llu with GPU-only native textured triangle\n",draw,frame);
++    return true;
++}
+ } // namespace
+ 
+ void draw(const State &st, const Vertex *v, int count) {
+@@ -2043,6 +2111,8 @@
+         capture_native_after();
+         return;
+     }
++    static const bool native_triangle = std::getenv("PS2_NATIVE_TRIANGLE") != nullptr;
++    if (native_triangle && native_triangle_draw(st, v, count)) return;
+     static const bool native_bridge = std::getenv("PS2_NATIVE_TARGET_BRIDGE") != nullptr;
+     if (native_bridge) native_target_roundtrip(st);
+     if (g_image.active && !g_image.pending.empty()) flush_image();

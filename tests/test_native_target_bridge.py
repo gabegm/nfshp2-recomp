@@ -46,3 +46,41 @@ int main() {
             self.assertEqual(result.returncode,0,result.stderr)
             result=subprocess.run([str(folder/'test')],capture_output=True,text=True,timeout=10)
             self.assertEqual(result.returncode,0,result.stderr)
+
+    @unittest.skipUnless((INCLUDE/'webgpu/webgpu.h').exists(), 'Set up the private runtime headers first.')
+    def test_native_triangle_rejects_unsupported_materials(self):
+        source = r'''#include "native_triangle.hpp"
+#include <array>
+#include <cstdlib>
+using native_target::Triangle;
+#define CHECK(x) do {if(!(x))std::exit(__LINE__);}while(0)
+int main() {
+    std::array<unsigned,40> s{};
+    s[0]=2|2048|8192;s[2]=8;s[6]=0x31;s[23]=0xffffff;s[10]=511u<<16;s[11]=447u<<16;
+    s[31]=8;s[33]=0x56;s[34]=0xffffffff;s[35]=2u<<20;s[36]=8;s[37]=2048;s[38]=0x56;s[39]=0xffffff;
+    s[14]=0x14;s[25]=3u<<20;s[26]=1;s[28]=0x77;s[29]=15;
+    CHECK(Triangle::supported(s.data()));
+    for(unsigned feature:{4u,128u,4096u}){auto bad=s;bad[0]|=feature;CHECK(!Triangle::supported(bad.data()));}
+    auto bad=s;bad[0]&=~2048u;CHECK(!Triangle::supported(bad.data()));
+    bad=s;bad[0]&=~2u;CHECK(!Triangle::supported(bad.data()));
+    bad=s;bad[0]|=64;bad[7]=1u<<4;CHECK(!Triangle::supported(bad.data()));
+    bad=s;bad[0]|=8;bad[7]=4u<<12;CHECK(!Triangle::supported(bad.data()));
+    bad=s;bad[0]|=8;CHECK(Triangle::supported(bad.data()));
+    for(unsigned mode:{2u<<24,2u<<26,1u<<28}) {bad=s;bad[7]=mode;CHECK(!Triangle::supported(bad.data()));}
+    bad=s;bad[15]=11;CHECK(!Triangle::supported(bad.data()));
+    bad=s;bad[15]=11u<<8;CHECK(!Triangle::supported(bad.data()));
+    bad=s;bad[14]=0x3f;CHECK(!Triangle::supported(bad.data()));
+    bad=s;bad[25]=0;CHECK(!Triangle::supported(bad.data()));
+    bad=s;bad[25]=2u<<20;CHECK(!Triangle::supported(bad.data()));
+    bad=s;bad[25]=(4u<<20)-4096;CHECK(!Triangle::supported(bad.data()));
+    bad=s;bad[28]=0;CHECK(!Triangle::supported(bad.data()));
+}'''
+        compiler=shutil.which('c++')
+        if not compiler:self.skipTest('A C++17 compiler is required.')
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder);(folder/'test.cpp').write_text(source)
+            result=subprocess.run([compiler,'-std=c++17','-O2','-I',str(ROOT/'tools'),'-I',str(INCLUDE),
+                                   str(folder/'test.cpp'),'-o',str(folder/'test')],capture_output=True,text=True,timeout=30)
+            self.assertEqual(result.returncode,0,result.stderr)
+            result=subprocess.run([str(folder/'test')],capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stderr)

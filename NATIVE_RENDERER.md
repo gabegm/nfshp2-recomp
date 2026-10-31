@@ -356,3 +356,49 @@ complete save states against archived binaries in the 600-frame initial race,
 120-frame later/widescreen/menu runs and 24-frame predecode/2x runs. The actual
 handoff ran in the race, later, widescreen and predecode cases; menu and 2x
 configurations were rejected and exercised the unchanged fallback.
+
+## First native triangle inside gameplay (experimental)
+
+`native-triangle.patch` and the shared `tools/native_triangle.hpp` now allow
+one selected game triangle to use native Vulkan rasterization. This path uses
+the runtime's existing GPU texture decoder and GPU-only colour/depth handoff;
+it does not read textures or framebuffers back through the CPU. Normal gameplay
+continues to use the GS renderer unless this diagnostic is explicitly enabled.
+
+```sh
+PS2_NATIVE_TRIANGLE=3040,100 bash scripts/play.sh --performance \
+  --load-state games/nfshp2/performance/race.ps2state --frames 3044 \
+  --press 3001:cross:44 --frames-dir "$PWD/.local/native-check" --no-record
+.local/native-preview/native-triangle-test
+```
+
+The selector is an emulation frame and GPU draw ordinal, with the same
+single-thread/frame-dump requirement as material capture. The path consumes
+its selection once. Unsupported states execute normally through the GS path.
+It supports only the guarded source-pass textured triangle subset described
+above, positive perspective Q, finite inputs and 24-bit vertex depth. All other
+draws retain GS rendering. Attachments, decoded texture storage, samplers and
+bounded depth-state pipelines are reused; texture contents are decoded fresh
+for the selected draw, so no unvalidated texture-cache coherence is assumed.
+
+The explicit hardware suite now includes seven native triangle transactions.
+It checks every VRAM word against analytic coverage, colour, depth and preserved
+upper bytes, including equal-depth rules, alpha rejection and masked Z writes.
+Synthetic tests additionally exercise the production material rejection gate.
+
+Five actual in-game selections matched the earlier offline results: 56, 10,
+1, 0 and 0 differing colour words, with maximum channel errors of 1, 1, 2,
+0 and 0 respectively. Depth and every other VRAM word matched exactly; all
+captured texture/material inputs, guest RAM and audio matched. An incompatible
+reflection/shadow draw was rejected and retained identical output.
+
+This proves the native-to-GS handoff for sampled individual draws, not general
+rendering compatibility. Colour interpolation/filtering is still not bit exact.
+The one-draw import/decode/resolve has substantial overhead and is not an FPS
+optimization or a supported play mode. The next performance step is to batch
+compatible consecutive triangles so they share those costs, then measure the
+result before enabling broader replacement.
+
+The first captured post-handoff image also matched exactly in all six live
+selection tests. Small one-draw colour differences above were measured in VRAM
+immediately after the selected draw, rather than inferred from a later image.

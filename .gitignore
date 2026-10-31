@@ -59,3 +59,7 @@
 !/tools/native_target_bridge_test.cpp
 !/tests/test_native_target_bridge.py
 !/patches/native-target-bridge.patch
+
+!/tools/native_triangle.hpp
+!/tools/native_triangle_test.cpp
+!/patches/native-triangle.patch
