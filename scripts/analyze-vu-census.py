@@ -149,6 +149,17 @@ def summarize(root, meshes=False):
                         for triangle in packet['triangles']:
                             obj.write('f ' + ' '.join(str(i + 1) for i in triangle) + '\n')
                     result['mesh'] = destination.name
+                    if packet['mesh_complete']:
+                        preview = path.with_suffix('.nfm')
+                        with preview.open('wb') as mesh:
+                            mesh.write(struct.pack('<4sI', b'NFM1', len(packet['triangles'])*3))
+                            for triangle in packet['triangles']:
+                                for index in triangle:
+                                    v = packet['vertices'][index]
+                                    rgb = [c/255 for c in v['rgba'][:3]] if v['rgba'] is not None else [0.75]*3
+                                    mesh.write(struct.pack('<5f', v['x']/16, v['y']/16, *rgb))
+                        result['preview_mesh'] = preview.name
+
                 samples.append(result)
     return dict(version=1, frames=len(seen_frames),
                 programs=[dict(key=k, entry=entry, **totals) for (k, entry), totals in

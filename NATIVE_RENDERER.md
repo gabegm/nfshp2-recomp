@@ -125,3 +125,41 @@ log and limit conclusions about those overlay sections.
 
 Synthetic tests validate ELF bounds/metadata and safe archive extraction,
 including restoration of executable permissions. No game data is used by them.
+
+## Standalone native mesh preview
+
+The Linux research preview uses Vulkan hardware triangle rasterization through
+wgpu-native, vertex buffers and a conventional vertex/fragment pipeline. It
+is a separate executable and never replaces the playable renderer.
+
+```sh
+bash scripts/build-native-preview.sh
+python3 scripts/test-native-preview.py
+python3 scripts/analyze-vu-census.py .local/vu-capture --meshes
+.local/native-preview/native-mesh-preview \
+  .local/vu-capture/CHOSEN_PACKET.nfm .local/native-preview/mesh.ppm
+```
+
+Choose a `preview_mesh` filename listed in the private `summary.json`;
+`CHOSEN_PACKET` is a placeholder. The analyzer emits `.nfm` only for supported,
+self-contained geometry with drawable triangles. Each file starts with `NFM1`,
+a little-endian vertex count, then flattened triangle-list vertices containing
+five little-endian floats: projected X/Y and RGB. Unknown colours use grey.
+
+The preview fits projected geometry into a 512x512 view and interpolates its
+vertex colours. It omits textures, depth, fog, PS2 alpha tests/blending and
+framebuffer sharing. It is not a screenshot comparison or a complete native
+material implementation. It demonstrates that captured geometry can reach
+the hardware rasterizer without the compute-based GS raster loop. No frame-rate
+claim follows from drawing an isolated packet.
+
+The explicit hardware test checks a synthetic RGB triangle against analytic
+colour/coverage at 729 sample pixels and rejects malformed/non-finite meshes.
+It requires a hardware Vulkan adapter and refuses a software adapter. Captured
+geometry from both race samples was also rendered on the UHD 620; those meshes
+and previews remain private. The default unit suite needs neither GPU access
+nor game assets; the hardware test is a separate explicit command.
+
+The next rendering milestone needs native textures/materials and a compatible
+colour/depth handoff with the fallback renderer. A standalone preview does not
+solve draw ordering or render-to-texture dependencies inside the game.

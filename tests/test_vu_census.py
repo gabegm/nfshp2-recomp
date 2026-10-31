@@ -80,5 +80,6 @@ class GifPacketTests(unittest.TestCase):
             self.assertEqual(result['programs'][0]['calls'], 3)
             self.assertEqual(result['frames'], 1)
             self.assertIn('f 1 2 3', (root/'sample.obj').read_text())
+            self.assertEqual(struct.unpack_from('<4sI', (root/'sample.nfm').read_bytes()), (b'NFM1', 3))
             (root/'sample.gif').write_bytes(packet[:-16])
             with self.assertRaises(helper.PacketError):helper.summarize(root)
