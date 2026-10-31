@@ -1,0 +1,125 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -18,6 +18,8 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <deque>
++#include <filesystem>
++#include <fstream>
+ #include <memory>
+ #include <string>
+ #include <thread>
+@@ -899,9 +901,9 @@
+     return wgpuDeviceCreateBuffer(g_device, &d);
+ }
+ 
+-WGPUBindGroup make_group(WGPUBuffer params, WGPUBuffer data) {
++WGPUBindGroup make_group(WGPUBuffer params, WGPUBuffer data, WGPUBuffer decoded_buffer = nullptr) {
+     WGPUBindGroupEntry e[8] = {};
+-    WGPUBuffer buffers[8] = {g_vram, g_tables, params, data, g_clut, g_scratch, g_cache, g_decoded};
++    WGPUBuffer buffers[8] = {g_vram, g_tables, params, data, g_clut, g_scratch, g_cache, decoded_buffer ? decoded_buffer : g_decoded};
+     for (int i = 0; i < 8; ++i) {
+         e[i] = WGPU_BIND_GROUP_ENTRY_INIT;
+         e[i].binding = static_cast<std::uint32_t>(i);
+@@ -1888,7 +1890,101 @@
+     return true;
+ }
+ 
++namespace {
++// Research-only snapshot, taken on the GS render thread before one draw.
++// read_state flushes prior work and reads the actual GPU palette, not the
++// software renderer's possibly stale VRAM/CLUT shadow.
++#if defined(_MSC_VER)
++__declspec(noinline)
++#elif defined(__GNUC__) || defined(__clang__)
++__attribute__((noinline))
++#endif
++void capture_native_draw(const State &st, const Vertex *vertices, int count) {
++    static const std::string spec = os::env("PS2_NATIVE_DRAW_CAPTURE");
++    static unsigned long long ordinal = 0;
++    static bool finished = false;
++    if (spec.empty() || finished) return;
++    unsigned long long wanted_frame = 0, wanted_draw = 0;
++    char folder[1024] = {};
++    if (std::sscanf(spec.c_str(), "%llu,%llu,%1023[^\n]", &wanted_frame, &wanted_draw, folder) != 3) return;
++    const auto frame = frame_count();
++    if (frame != wanted_frame || ordinal++ != wanted_draw) return;
++    finished = true;
++    if (!os::env("PS2_GS_SHADER").empty() || !os::env("PS2_GPU_SKIP").empty() || !os::env("PS2_GPU_BENCH").empty()) {
++        std::fprintf(stderr, "[native-capture] use the built-in shader without skip/replay experiments\n");
++        return;
++    }
++    if (g_scale != 1) { std::fprintf(stderr, "[native-capture] use internal scale 1 for this capture\n"); return; }
++    const auto root = os::path(folder);
++    std::error_code error;
++    std::filesystem::create_directories(root, error);
++    if (error) { std::fprintf(stderr, "[native-capture] cannot create directory\n"); return; }
++    std::vector<std::uint32_t> vram, palette, tables;
++    std::uint32_t scale = 1;
++    read_state(vram, scale, palette);
++    swizzle_tables(tables);
++    const auto words = [&](const char *name, const std::uint32_t *source, std::size_t size) {
++        std::vector<std::uint8_t> bytes(size * 4);
++        for (std::size_t i = 0; i < size; ++i)
++            for (unsigned j = 0; j < 4; ++j) bytes[i * 4 + j] = static_cast<std::uint8_t>(source[i] >> (j * 8));
++        std::ofstream file(root / name, std::ios::binary);
++        if (!file.write(reinterpret_cast<const char *>(bytes.data()), bytes.size())) std::fprintf(stderr, "[native-capture] write failed\n");
++    };
++    std::uint64_t attr = st.prim;
++    if (!(st.prmodecont & 1u)) attr = (st.prim & 7u) | (st.prmode & ~7ull);
++    const Context &context = st.ctx[(attr >> 9) & 1u];
++    std::uint32_t setup[kSetupWords] = {};
++    make_setup(st, attr, setup);
++    words("vram.bin", vram.data(), vram.size());
++    words("clut.bin", palette.data(), palette.size());
++    words("tables.bin", tables.data(), tables.size());
++    words("setup.bin", setup, kSetupWords);
++    if (setup[0] & 2u) {
++        const auto texels = 1u << ((setup[15] & 255u) + (setup[15] >> 8));
++        const auto setup_offset = arena_append(setup, sizeof setup);
++        const auto params = push_params({setup_offset, 0, texels});
++        ensure_capacity();
++        wgpuQueueWriteBuffer(g_queue, g_data, 0, g_arena.data(), g_arena.size() * 4);
++        wgpuQueueWriteBuffer(g_queue, g_params, 0, g_param_records.data(), g_param_records.size() * kParamStride);
++        WGPUBuffer texture = make_buffer(texels * 4, WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc);
++        WGPUBindGroup group = make_group(g_params, g_data, texture);
++        WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
++        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
++        wgpuComputePassEncoderSetPipeline(pass, g_pipelines[kDecode]);
++        const std::uint32_t offset = params * kParamStride;
++        wgpuComputePassEncoderSetBindGroup(pass, 0, group, 1, &offset);
++        const auto groups = (texels + 63u) / 64u;
++        wgpuComputePassEncoderDispatchWorkgroups(pass, std::min(groups, 1024u), (groups + 1023u) / 1024u, 1);
++        wgpuComputePassEncoderEnd(pass);
++        wgpuComputePassEncoderRelease(pass);
++        WGPUCommandBuffer command = wgpuCommandEncoderFinish(encoder, nullptr);
++        wgpuQueueSubmit(g_queue, 1, &command);
++        std::vector<std::uint32_t> decoded(texels);
++        read_back(texture, texels * 4, decoded.data());
++        words("texture-reference.bin", decoded.data(), decoded.size());
++        wgpuCommandBufferRelease(command);
++        wgpuCommandEncoderRelease(encoder);
++        wgpuBindGroupRelease(group);
++        wgpuBufferRelease(texture);
++        g_param_records.clear();
++        g_arena.clear();
++    }
++    std::FILE *out = os::open((root / "draw.json").string().c_str(), "w");
++    if (!out) { std::fprintf(stderr, "[native-capture] cannot write manifest\n"); return; }
++    std::fprintf(out, "{\"version\":1,\"frame\":%llu,\"ordinal\":%llu,\"scale\":%u,\"attr\":%llu,\"xyoffset\":[%u,%u],\"vertices\":[", static_cast<unsigned long long>(frame), wanted_draw, scale, static_cast<unsigned long long>(attr), static_cast<unsigned>(context.xyoffset & 65535u), static_cast<unsigned>((context.xyoffset >> 32) & 65535u));
++    for (int i = 0; i < count; ++i) {
++        const Vertex &v = vertices[i];
++        std::fprintf(out, "%s{\"x\":%u,\"y\":%u,\"z\":%u,\"rgba\":[%u,%u,%u,%u],\"stq_bits\":[%u,%u,%u],\"uv\":[%u,%u],\"fog\":%u}", i ? "," : "", v.x, v.y, v.z, v.r, v.g, v.b, v.a, f2u(v.s), f2u(v.t), f2u(v.q), v.u, v.v, v.f);
++    }
++    std::fprintf(out, "]}\n");
++    std::fclose(out);
++    std::fprintf(stderr, "[native-capture] saved draw %llu of emulation frame %llu\n", wanted_draw, static_cast<unsigned long long>(frame));
++}
++} // namespace
++
+ void draw(const State &st, const Vertex *v, int count) {
++    static const bool native_capture = std::getenv("PS2_NATIVE_DRAW_CAPTURE") != nullptr;
++    if (native_capture) capture_native_draw(st, v, count);
+     if (g_image.active && !g_image.pending.empty()) flush_image();
+     std::uint64_t attr = st.prim;
+     if (!(st.prmodecont & 1u)) attr = (st.prim & 7u) | (st.prmode & ~7ull);

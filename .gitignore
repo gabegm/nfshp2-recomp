@@ -21,6 +21,7 @@
 !/scripts/ExportVuReferences.java
 !/scripts/build-native-preview.sh
 !/scripts/test-native-preview.py
+!/scripts/prepare-native-material.py
 !/tests/
 /tests/*
 !/tests/test_widescreen.py
@@ -29,6 +30,7 @@
 !/tests/test_upload_cache.py
 !/tests/test_vu_census.py
 !/tests/test_ghidra_tools.py
+!/tests/test_native_material.py
 !/patches/
 /patches/*
 !/patches/runtime-compatibility.patch
@@ -41,6 +43,7 @@
 !/patches/palette-reuse.patch
 !/patches/upload-cache-eviction.patch
 !/patches/vu-census.patch
+!/patches/native-draw-capture.patch
 !/patches/LICENSE.upstream
 !/tools/
 /tools/*

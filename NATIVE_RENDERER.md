@@ -126,7 +126,7 @@ log and limit conclusions about those overlay sections.
 Synthetic tests validate ELF bounds/metadata and safe archive extraction,
 including restoration of executable permissions. No game data is used by them.
 
-## Standalone native mesh preview
+## Standalone native mesh and material preview
 
 The Linux research preview uses Vulkan hardware triangle rasterization through
 wgpu-native, vertex buffers and a conventional vertex/fragment pipeline. It
@@ -146,15 +146,19 @@ self-contained geometry with drawable triangles. Each file starts with `NFM1`,
 a little-endian vertex count, then flattened triangle-list vertices containing
 five little-endian floats: projected X/Y and RGB. Unknown colours use grey.
 
-The preview fits projected geometry into a 512x512 view and interpolates its
-vertex colours. It omits textures, depth, fog, PS2 alpha tests/blending and
-framebuffer sharing. It is not a screenshot comparison or a complete native
-material implementation. It demonstrates that captured geometry can reach
+The NFM1 preview fits projected geometry into a 512x512 view and interpolates
+its vertex colours. NFM2 adds decoded base-level textures, perspective STQ,
+repeat/clamp addressing, nearest/bilinear sampling, texture functions, TCC and
+alpha tests. Neither mode implements depth, fog, destination alpha, PS2 blending
+or framebuffer sharing. This is not a complete native material implementation
+or a screenshot comparison. It demonstrates that captured geometry can reach
 the hardware rasterizer without the compute-based GS raster loop. No frame-rate
 claim follows from drawing an isolated packet.
 
 The explicit hardware test checks a synthetic RGB triangle against analytic
-colour/coverage at 729 sample pixels and rejects malformed/non-finite meshes.
+colour/coverage at 729 sample pixels, then six textured cases covering addressing,
+filtering, perspective coordinates, texture functions and alpha tests. It also
+rejects malformed/non-finite meshes.
 It requires a hardware Vulkan adapter and refuses a software adapter. Captured
 geometry from both race samples was also rendered on the UHD 620; those meshes
 and previews remain private. The default unit suite needs neither GPU access
@@ -163,3 +167,63 @@ nor game assets; the hardware test is a separate explicit command.
 The next rendering milestone needs native textures/materials and a compatible
 colour/depth handoff with the fallback renderer. A standalone preview does not
 solve draw ordering or render-to-texture dependencies inside the game.
+
+## Capture a complete material input
+
+`patches/native-draw-capture.patch` optionally snapshots one primitive at the
+GPU draw entry. It reads actual GPU VRAM and the current palette after flushing
+prior work. It also runs the existing GPU texture decoder into a temporary
+buffer to provide an independent reference for the offline decoder. It does
+not rely on potentially stale software-side palette or VRAM shadows.
+
+Use internal scale 1 and a deterministic single-thread capture arrangement.
+For example, with the same private race checkpoint used above:
+
+```sh
+PS2_SCALE=1 PS2_NATIVE_DRAW_CAPTURE="3040,100,$PWD/.local/native-draw" \
+  bash scripts/play.sh --performance \
+  --load-state games/nfshp2/performance/race.ps2state \
+  --frames 3044 --press 3001:cross:44 --rtc 1700000000 --no-record \
+  --frames-dir "$PWD/.local/material-reference" --frame-every 3044
+python3 scripts/prepare-native-material.py .local/native-draw
+.local/native-preview/native-mesh-preview \
+  .local/native-draw/triangle.nfm .local/native-preview/material.ppm
+```
+
+The selector is `emulation-frame,GPU-draw-ordinal,directory`. Ordinals start
+at zero for that selected frame and count GPU draw calls before clipping or
+degeneracy rejection. With separate emulation/render threads, the sampled
+emulation frame is not an exact GS frame boundary; use `--frames-dir` or
+`PS2_ONE_THREAD=1` for reproducible selection. The hook is disabled by default,
+keeps capture state off the normal draw stack, and rejects higher internal
+scales, shader overrides and GPU skip/replay combinations.
+
+Snapshots contain 4 MB VRAM, 512 palette entries, swizzle tables, the 40-word
+runtime setup descriptor and original vertices. Word buffers are little-endian.
+These are private game data. The decoder supports direct and indexed PS2 texture
+formats, including palette banking and TEXA alpha expansion, and fails if its
+RGBA output differs from the captured GPU reference. The current NFM2 exporter
+accepts one assembled textured triangle and repeat/clamp addressing; it rejects
+region wrapping. An NFM2 header contains `NFM2` followed by six little-endian
+words: vertex count, texture width/height, setup flags/modes and alpha reference.
+Each vertex contains nine floats: X/Y, RGBA and S/T/Q. RGBA texels follow.
+
+Real 8-bit and 4-bit captures matched the GPU texture reference byte for byte,
+including later-scene, menu, widescreen and predecode samples. Captured textured
+triangles from both race scenes were drawn using the native hardware pipeline.
+Some inspected draws use a source-pass blend equation even though the PS2 ABE
+flag is set; that is a useful candidate for an opaque/cutout native path, not
+proof that every draw with the same VU entry is safe to replace.
+
+Material-capture-enabled comparisons matched images, guest RAM, audio and full
+save states for the 600-frame initial race, later/menu/widescreen 120-frame
+samples and a 24-frame predecode sample. A 24-frame 2x run correctly rejected
+capture and retained matching output. With diagnostics disabled, paired runs
+were 50.63/50.39 fps for the archived build and 50.78/50.14 for the instrumented
+build, within observed variation. No gameplay speedup is claimed.
+
+The synthetic unit suite now includes texture addressing, 4-bit nibble selection,
+palette banks, alpha expansion, buffer bounds, flat colour/FST conversion and
+GPU-reference mismatch rejection. The hardware suite separately tests the
+conventional render pipeline. Both are required evidence before expanding
+this preview into an in-game path; neither establishes full-game compatibility.
