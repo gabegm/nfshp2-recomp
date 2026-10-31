@@ -1,0 +1,58 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -1,4 +1,5 @@
+ #include "gpu.hpp"
++#include "native_target_bridge.hpp"
+ #include "ps2/hitch.hpp"
+ #include "ps2/os.hpp"
+ #include "ps2/system.hpp"
+@@ -1998,6 +1999,40 @@
+         std::ofstream after(g_native_capture_root / "vram-after.bin", std::ios::binary);
+         if (!after.write(reinterpret_cast<const char *>(bytes.data()), bytes.size())) std::fprintf(stderr, "[native-capture] reference write failed\n");
+ }
++// Optional GPU-only attachment handoff; deliberately does not replace drawing.
++#if defined(_MSC_VER)
++__declspec(noinline)
++#elif defined(__GNUC__) || defined(__clang__)
++__attribute__((noinline))
++#endif
++void native_target_roundtrip(const State &st) {
++    static const std::string spec = os::env("PS2_NATIVE_TARGET_BRIDGE");
++    static unsigned long long ordinal = 0;
++    static bool finished = false;
++    unsigned long long frame = 0, draw = 0;
++    if (finished || std::sscanf(spec.c_str(), "%llu,%llu", &frame, &draw) != 2 || frame_count() != frame || ordinal++ != draw) return;
++    finished = true;
++    std::uint32_t setup[kSetupWords] = {};
++    const auto attr = (st.prmodecont & 1u) ? st.prim : ((st.prim & 7u) | (st.prmode & ~7ull));
++    make_setup(st, attr, setup);
++    if (g_scale != 1 || !os::env("PS2_GS_SHADER").empty() || !os::env("PS2_GPU_SKIP").empty() || !os::env("PS2_GPU_BENCH").empty() || !native_target::Bridge::supported(setup)) {
++        std::fprintf(stderr, "[native-target] unsupported configuration; retained GS rendering\n");
++        return;
++    }
++    flush_all();
++    submit();
++    static native_target::Bridge bridge;
++    if (!bridge.init(g_device)) return;
++    auto encoder = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
++    if (bridge.begin(g_queue, encoder, g_vram, g_tables, setup)) {
++        bridge.finish(encoder, g_vram, g_tables);
++        auto command = wgpuCommandEncoderFinish(encoder, nullptr);
++        wgpuQueueSubmit(g_queue, 1, &command);
++        wgpuCommandBufferRelease(command);
++        std::fprintf(stderr, "[native-target] GPU-only %ux%u colour/depth round trip; no native game draw\n", bridge.width(), bridge.height());
++    }
++    wgpuCommandEncoderRelease(encoder);
++}
+ } // namespace
+ 
+ void draw(const State &st, const Vertex *v, int count) {
+@@ -2008,6 +2043,8 @@
+         capture_native_after();
+         return;
+     }
++    static const bool native_bridge = std::getenv("PS2_NATIVE_TARGET_BRIDGE") != nullptr;
++    if (native_bridge) native_target_roundtrip(st);
+     if (g_image.active && !g_image.pending.empty()) flush_image();
+     std::uint64_t attr = st.prim;
+     if (!(st.prmodecont & 1u)) attr = (st.prim & 7u) | (st.prmode & ~7ull);

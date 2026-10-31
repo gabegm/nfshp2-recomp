@@ -53,3 +53,9 @@
 
 # Never track disc images, including mixed-case extensions, in any directory.
 *.[iI][sS][oO]
+
+# Hand-written GPU attachment handoff and synthetic verification.
+!/tools/native_target_bridge.hpp
+!/tools/native_target_bridge_test.cpp
+!/tests/test_native_target_bridge.py
+!/patches/native-target-bridge.patch

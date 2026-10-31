@@ -306,3 +306,53 @@ The native depth attachment represents the 24-bit depth values, not the unused
 upper byte of each PS2 Z24 word. A future live VRAM resolve must preserve those
 unrepresented bits and synchronize all fallback reads/writes. Matching the
 standalone depth comparison does not establish that live cache-coherence work.
+
+## GPU-only colour/depth handoff
+
+The shared, hand-written `tools/native_target_bridge.hpp` now imports actual
+PS2 GPU VRAM into reusable RGBA8 and Depth32Float attachments and resolves them
+back entirely on the GPU. The runtime build installs that header alongside the
+optional `native-target-bridge.patch`; no game code is included in either.
+
+```sh
+bash scripts/build-native-preview.sh
+.local/native-preview/native-target-bridge-test
+```
+
+The synthetic hardware test checks all 4 MB of VRAM after eight transactions:
+round trips and native attachment clears, four sizes including partial pages,
+resource reuse, untouched regions and preservation of all depth upper bytes.
+Independent colour/depth address permutations detect mapping mistakes. The
+production state gate is also tested without GPU access.
+
+Depth uses an exact power-of-two representation, `Z / 2^24`, rather than
+`Z / (2^24 - 1)`. The latter caused one-integer-unit round-trip errors on the
+UHD 620. Every 24-bit integer is representable in the chosen representation;
+resolve clamps and scales back before retaining the original upper byte.
+Native draws using these attachments must use the same representation.
+
+The optional in-runtime diagnostic selects one draw boundary:
+
+```sh
+PS2_NATIVE_TARGET_BRIDGE=3040,100 bash scripts/play.sh --performance \
+  --load-state games/nfshp2/performance/race.ps2state --frames 3044 \
+  --press 3001:cross:44 --frames-dir "$PWD/.local/bridge-check" --no-record
+```
+
+This diagnostic imports and resolves without replacing any game draw. It rejects
+scales other than 1, custom shaders, GPU skip/replay, wrapped or aliased surfaces,
+nonzero-origin/partial scissors, masked colour, and formats other than PSMCT32
+colour plus PSMZ24 depth. It is disabled by default.
+
+Only resource allocation persists across transactions. Contents are imported
+fresh after queued GS work is submitted, and resolved on the same queue before
+fallback work resumes. There is no persistent authoritative native framebuffer,
+texture cache, CPU readback, or game-draw acceleration in this milestone.
+The conservative per-transaction import/resolve is a correctness building block;
+it would be too expensive to perform for every triangle.
+
+The in-runtime round trip retained byte-identical images, guest RAM, audio and
+complete save states against archived binaries in the 600-frame initial race,
+120-frame later/widescreen/menu runs and 24-frame predecode/2x runs. The actual
+handoff ran in the race, later, widescreen and predecode cases; menu and 2x
+configurations were rejected and exercised the unchanged fallback.

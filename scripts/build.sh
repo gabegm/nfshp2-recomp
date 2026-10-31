@@ -58,7 +58,13 @@ python3 "$root/scripts/apply-runtime-patches.py" "$upstream" \
   "$root/patches/upload-cache-eviction.patch" \
   "$root/patches/vu-census.patch" \
   "$root/patches/native-draw-capture.patch" \
-  "$root/patches/native-frame-proof.patch"
+  "$root/patches/native-frame-proof.patch" \
+  "$root/patches/native-target-bridge.patch"
+# Install the hand-written shared bridge without rebuilding on unchanged copies.
+bridge_header="$upstream/runtime/src/gs/gpu/native_target_bridge.hpp"
+if ! cmp -s "$root/tools/native_target_bridge.hpp" "$bridge_header"; then
+  cp "$root/tools/native_target_bridge.hpp" "$bridge_header"
+fi
 if [ "$wide" = 1 ]; then
   wide_patch=$(python3 "$root/scripts/fetch-widescreen.py" "$image")
   port_args+=(--widescreen --pnach "$wide_patch" --pnach-section 'Widescreen 16:9' --pnach-section 'HUD fixed for widescreen')

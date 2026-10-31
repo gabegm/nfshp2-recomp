@@ -4,6 +4,10 @@ import subprocess
 import sys
 
 allowed = {
+    'tools/native_target_bridge.hpp',
+    'tools/native_target_bridge_test.cpp',
+    'tests/test_native_target_bridge.py',
+    'patches/native-target-bridge.patch',
     '.gitignore', '.gitattributes', 'README.md', 'LICENSE', 'scripts/build.sh',
     'scripts/check-public-files.py',
     'scripts/play.sh', 'patches/runtime-compatibility.patch',
