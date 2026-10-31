@@ -164,9 +164,10 @@ Ace Combat 5 and other PS2 projects, see [OPTIMIZATION.md](OPTIMIZATION.md).
 The ordinary GPU meter covers compute passes; the optional trace also measures
 the final display filter. Other projects' results do not establish an NFS speedup.
 
-For the native-renderer investigation and optional VU/geometry capture tools,
-see [NATIVE_RENDERER.md](NATIVE_RENDERER.md). The playable renderer remains
-the verified GS implementation.
+For VU/geometry capture, GPU-only framebuffer handoff, and experimental native
+triangle/batch rendering, see [NATIVE_RENDERER.md](NATIVE_RENDERER.md). These
+experiments are disabled by default; normal play uses the verified GS renderer.
+No racing FPS improvement from the experimental renderer is claimed.
 
 ## Publication policy
 

@@ -1,0 +1,221 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -50,6 +50,9 @@
+ constexpr std::uint32_t kDecodePrims = 64;
+ 
+ Mode g_mode = Mode::off;
++const bool g_native_batch_enabled = std::getenv("PS2_NATIVE_BATCH") != nullptr &&
++    !std::getenv("PS2_NATIVE_TRIANGLE") && !std::getenv("PS2_NATIVE_TARGET_BRIDGE");
++void flush_native_batch();
+ std::uint64_t g_dispatches[kPipelines] = {}, g_submits = 0;
+ 
+ WGPUInstance g_instance = nullptr;
+@@ -874,6 +877,7 @@
+ }
+ 
+ void flush_all() {
++    if (g_native_batch_enabled) flush_native_batch();
+     flush_image();
+     emit_all();
+ }
+@@ -2034,33 +2038,20 @@
+     }
+     wgpuCommandEncoderRelease(encoder);
+ }
+-// One explicitly selected research triangle; all other draws use the GS path.
+-#if defined(_MSC_VER)
+-__declspec(noinline)
+-#elif defined(__GNUC__) || defined(__clang__)
+-__attribute__((noinline))
+-#endif
+-bool native_triangle_draw(const State &st, const Vertex *vertices, int count) {
+-    static const std::string spec = os::env("PS2_NATIVE_TRIANGLE");
+-    static unsigned long long ordinal = 0;
+-    static bool finished = false;
+-    unsigned long long frame = 0, draw = 0;
+-    if (finished || std::sscanf(spec.c_str(), "%llu,%llu", &frame, &draw) != 2 || frame_count() != frame || ordinal++ != draw) return false;
+-    finished = true;
++// Guard and vertex conversion shared by the single-draw and batched experiments.
++bool native_triangle_input(const State &st, const Vertex *vertices, int count,
++                           std::uint32_t *setup, native_target::Vertex *input) {
+     const auto attr = (st.prmodecont & 1u) ? st.prim : ((st.prim & 7u) | (st.prmode & ~7ull));
+     const auto prim = attr & 7u;
+-    std::uint32_t setup[kSetupWords] = {};
+     make_setup(st, attr, setup);
+-    const auto reject = [] { std::fprintf(stderr, "[native-triangle] unsupported draw; retained GS rendering\n"); return false; };
+-    if (g_scale != 1 || !os::env("PS2_GS_SHADER").empty() || !os::env("PS2_GPU_SKIP").empty() || !os::env("PS2_GPU_BENCH").empty() || count != 3 || prim < 3 || prim > 5 || !native_target::Triangle::supported(setup)) return reject();
++    if (g_mode != Mode::primary || g_scale != 1 || !os::env("PS2_GS_SHADER").empty() || !os::env("PS2_GPU_SKIP").empty() || !os::env("PS2_GPU_BENCH").empty() || count != 3 || prim < 3 || prim > 5 || !native_target::Triangle::supported(setup)) return false;
+     const auto &context = st.ctx[(attr >> 9) & 1u];
+     const float ox = static_cast<float>(context.xyoffset & 65535u), oy = static_cast<float>((context.xyoffset >> 32) & 65535u);
+     const auto width = 1u << (setup[15] & 255u), height = 1u << (setup[15] >> 8);
+-    native_target::Vertex input[3];
+     for (int i = 0; i < 3; ++i) {
+         const auto &v = vertices[i];
+         const auto &colour = (setup[0] & 1u) ? v : vertices[2];
+-        if ((!(setup[0] & 16u) && !(v.q > 0)) || v.z > 0xffffffu || !std::isfinite(v.s) || !std::isfinite(v.t) || !std::isfinite(v.q)) return reject();
++        if ((!(setup[0] & 16u) && !(v.q > 0)) || v.z > 0xffffffu || !std::isfinite(v.s) || !std::isfinite(v.t) || !std::isfinite(v.q)) return false;
+         input[i] = {(static_cast<float>(v.x)-ox)/16, (static_cast<float>(v.y)-oy)/16,
+                     colour.r/255.0f,colour.g/255.0f,colour.b/255.0f,colour.a/255.0f,
+                     v.s,v.t,v.q,static_cast<float>(v.z)};
+@@ -2068,12 +2059,16 @@
+     }
+     const auto &a=input[0], &b=input[1], &c=input[2];
+     const auto area=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+-    if (!std::isfinite(area) || std::abs(area)<1e-8f) return reject();
++    if (!std::isfinite(area) || std::abs(area)<1e-8f) return false;
++    return true;
++}
++bool render_native_triangles(const std::uint32_t *setup, const native_target::Vertex *input, unsigned count) {
+     flush_all();submit();
++    const auto width = 1u << (setup[15] & 255u), height = 1u << (setup[15] >> 8);
+     static native_target::Bridge bridge;
+     static native_target::Triangle triangle;
+-    if (!bridge.init(g_device) || !triangle.prepare(g_device,width,height)) return reject();
+-    const auto setup_offset=arena_append(setup,sizeof setup);
++    if (!bridge.init(g_device) || !triangle.prepare(g_device,width,height)) return false;
++    const auto setup_offset=arena_append(setup,kSetupWords*4);
+     const auto params=push_params({setup_offset,0,width*height});
+     ensure_capacity();
+     wgpuQueueWriteBuffer(g_queue,g_data,0,g_arena.data(),g_arena.size()*4);
+@@ -2088,17 +2083,98 @@
+     wgpuComputePassEncoderDispatchWorkgroups(pass,std::min(groups,1024u),(groups+1023u)/1024u,1);
+     wgpuComputePassEncoderEnd(pass);wgpuComputePassEncoderRelease(pass);
+     const bool begun=bridge.begin(g_queue,encoder,g_vram,g_tables,setup);
+-    const bool drawn=begun && triangle.encode(g_queue,encoder,bridge,input,setup);
++    const bool drawn=begun && triangle.encode_many(g_queue,encoder,bridge,input,count,setup);
+     if (drawn) bridge.finish(encoder,g_vram,g_tables);
+     auto command=wgpuCommandEncoderFinish(encoder,nullptr);
+     wgpuQueueSubmit(g_queue,1,&command);
+     wgpuCommandBufferRelease(command);wgpuCommandEncoderRelease(encoder);wgpuBindGroupRelease(group);
+     g_arena.clear();g_param_records.clear();
+-    if (!drawn) return reject();
++    if (!drawn) return false;
+     const int right=static_cast<int>(setup[2]*64)-1, bottom=static_cast<int>(setup[11]>>16);
+     mark_rendered(pages(setup[1],setup[2],setup[3],0,0,right,bottom));
+     if ((setup[0]&512u) && !(setup[0]&32u)) mark_rendered(pages(setup[5],setup[2],setup[6],0,0,right,bottom));
++    return true;
++}
++#if defined(_MSC_VER)
++__declspec(noinline)
++#elif defined(__GNUC__) || defined(__clang__)
++__attribute__((noinline))
++#endif
++bool native_triangle_draw(const State &st, const Vertex *vertices, int count) {
++    static const std::string spec = os::env("PS2_NATIVE_TRIANGLE");
++    static unsigned long long ordinal = 0;
++    static bool finished = false;
++    unsigned long long frame = 0, draw = 0;
++    if (finished || std::sscanf(spec.c_str(), "%llu,%llu", &frame, &draw) != 2 || frame_count() != frame || ordinal++ != draw) return false;
++    finished = true;
++    std::uint32_t setup[kSetupWords] = {};
++    native_target::Vertex input[3];
++    if (!native_triangle_input(st,vertices,count,setup,input) || !render_native_triangles(setup,input,3)) {
++        std::fprintf(stderr,"[native-triangle] unsupported draw; retained GS rendering\n");return false;
++    }
+     std::fprintf(stderr,"[native-triangle] replaced draw %llu of frame %llu with GPU-only native textured triangle\n",draw,frame);
++    return true;
++}
++
++struct NativeQueued {
++    State state;
++    std::array<Vertex,3> original;
++    std::array<native_target::Vertex,3> converted;
++};
++std::vector<NativeQueued> g_native_pending;
++std::array<std::uint32_t,kSetupWords> g_native_pending_setup;
++bool g_native_replay = false;
++void flush_native_batch() {
++    if (g_native_pending.empty()) return;
++    // Detach before calling flush_all in the renderer, preventing recursion.
++    std::vector<NativeQueued> pending;
++    pending.swap(g_native_pending);
++    std::vector<native_target::Vertex> input;
++    input.reserve(pending.size()*3);
++    for (const auto &draw : pending) input.insert(input.end(),draw.converted.begin(),draw.converted.end());
++    const bool drawn=render_native_triangles(g_native_pending_setup.data(),input.data(),static_cast<unsigned>(input.size()));
++    if (!drawn) {
++        g_native_replay=true;
++        for (const auto &queued : pending) {
++            g_setup_cache.generation=~0u;
++            draw(queued.state,queued.original.data(),3);
++        }
++        g_setup_cache.generation=~0u;
++        g_native_replay=false;
++    }
++    std::fprintf(stderr,"[native-batch] %zu triangles: %s\n",pending.size(),drawn?"one native draw, one texture decode, one colour/depth handoff":"replayed through GS fallback");
++    pending.clear();pending.swap(g_native_pending);
++}
++#if defined(_MSC_VER)
++__declspec(noinline)
++#elif defined(__GNUC__) || defined(__clang__)
++__attribute__((noinline))
++#endif
++bool native_batch_draw(const State &st,const Vertex *vertices,int count) {
++    if (g_native_replay) return false;
++    struct Selection {unsigned long long frame=0,first=0,limit=0;};
++    static const Selection selection=[] {
++        Selection s;const auto spec=os::env("PS2_NATIVE_BATCH");
++        if (std::sscanf(spec.c_str(),"%llu,%llu,%llu",&s.frame,&s.first,&s.limit)!=3 || s.limit>4096) s.limit=0;
++        return s;
++    }();
++    static unsigned long long ordinal=0;
++    if (frame_count()!=selection.frame) {flush_native_batch();return false;}
++    const auto index=ordinal++;
++    if(index<selection.first || index-selection.first>=selection.limit) {flush_native_batch();return false;}
++    std::uint32_t setup[kSetupWords]={};native_target::Vertex input[3];
++    if (!native_triangle_input(st,vertices,count,setup,input)) {flush_native_batch();return false;}
++    if (!g_native_pending.empty() && !std::equal(g_native_pending_setup.begin(),g_native_pending_setup.end(),setup)) flush_native_batch();
++    if (g_native_pending.empty()) std::copy_n(setup,kSetupWords,g_native_pending_setup.begin());
++    NativeQueued queued;queued.state=st;
++    std::copy_n(vertices,3,queued.original.begin());std::copy_n(input,3,queued.converted.begin());
++    g_native_pending.push_back(queued);
++    static const unsigned capacity=[] {
++        unsigned n=128;const auto spec=os::env("PS2_NATIVE_BATCH_SIZE");
++        if (std::sscanf(spec.c_str(),"%u",&n)!=1 || n<1 || n>128) n=128;
++        return n;
++    }();
++    if (g_native_pending.size()>=capacity) flush_native_batch();
+     return true;
+ }
+ } // namespace
+@@ -2111,6 +2187,7 @@
+         capture_native_after();
+         return;
+     }
++    if (g_native_batch_enabled && native_batch_draw(st,v,count)) return;
+     static const bool native_triangle = std::getenv("PS2_NATIVE_TRIANGLE") != nullptr;
+     if (native_triangle && native_triangle_draw(st, v, count)) return;
+     static const bool native_bridge = std::getenv("PS2_NATIVE_TARGET_BRIDGE") != nullptr;
+@@ -2333,6 +2410,7 @@
+ }
+ 
+ void image_begin(const State &s) {
++    if (g_native_batch_enabled) flush_native_batch();
+     flush_image();
+     Image &im = g_image;
+     const std::uint64_t buf = s.bitbltbuf, pos = s.trxpos, reg = s.trxreg;
+@@ -2350,6 +2428,7 @@
+ }
+ 
+ void image_data(const std::uint8_t *data, std::size_t bytes) {
++    if (g_native_batch_enabled) flush_native_batch();
+     Image &im = g_image;
+     if (!im.active) return;
+     if (im.pending.empty() && !im.lead_bits) {
+@@ -2383,6 +2462,7 @@
+ }
+ 
+ void load_clut(std::uint64_t tex0, std::uint64_t texclut) {
++    if (g_native_batch_enabled) flush_native_batch();
+     flush_image();
+     if (g_clut_loads + 2 >= kClutSlots) {
+         emit_all();
+@@ -2426,7 +2506,7 @@
+     }
+ }
+ 
+-void texflush() { ++g_texflushes; }
++void texflush() { if (g_native_batch_enabled) flush_native_batch(); ++g_texflushes; }
+ 
+ void flush() {
+     if (g_mode == Mode::off) return;

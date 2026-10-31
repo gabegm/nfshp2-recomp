@@ -3,6 +3,7 @@
 #include "native_target_bridge.hpp"
 #include <cmath>
 #include <initializer_list>
+#include <vector>
 
 namespace native_target {
 struct Vertex {float x,y,r,g,b,a,s,t,q,z;};
@@ -12,19 +13,21 @@ class Triangle {
     WGPUShaderModule module_=nullptr;
     WGPUComputePipeline copy_=nullptr;
     WGPURenderPipeline pipelines_[8]={};
-    WGPUBuffer vertex_=nullptr,uniform_=nullptr,decoded_=nullptr;
+    WGPUBuffer vertex_=nullptr,uniform_=nullptr,decoded_=nullptr,triangles_=nullptr;
+    unsigned vertex_capacity_=3;
     WGPUTexture image_=nullptr;
     WGPUTextureView image_view_=nullptr;
     WGPUSampler samplers_[8]={};
     unsigned width_=0,height_=0;
     static constexpr const char *shader_=R"(
-struct Out { @builtin(position) position:vec4<f32>, @location(0) colour:vec4<f32>, @location(1) stq:vec3<f32> }
+struct Out { @builtin(position) position:vec4<f32>, @location(0) colour:vec4<f32>, @location(1) stq:vec3<f32>, @location(2) @interpolate(flat) tri0:vec4<f32>, @location(3) @interpolate(flat) tri1:vec4<f32>, @location(4) @interpolate(flat) tri2:vec4<f32> }
 struct Material { flags:u32, modes:u32, aref:u32, pad:u32, tri0:vec4<f32>, tri1:vec4<f32>, tri2:vec4<f32> }
 @group(0) @binding(0) var image:texture_2d<f32>;
 @group(0) @binding(1) var texture_sampler:sampler;
 @group(0) @binding(2) var<uniform> material:Material;
-@vertex fn vs(@location(0) p:vec2<f32>,@location(1) colour:vec4<f32>,@location(2) stq:vec3<f32>,@location(3) z:f32)->Out {
-    var out:Out;out.position=vec4<f32>(p,z,1.0);out.colour=colour;out.stq=stq;return out;
+@group(0) @binding(5) var<storage,read> triangles:array<vec4<f32>>;
+@vertex fn vs(@builtin(vertex_index) vertex_index:u32,@location(0) p:vec2<f32>,@location(1) colour:vec4<f32>,@location(2) stq:vec3<f32>,@location(3) z:f32)->Out {
+    var out:Out;out.position=vec4<f32>(p,z,1.0);out.colour=colour;out.stq=stq;let index=(vertex_index/3u)*3u;out.tri0=triangles[index];out.tri1=triangles[index+1u];out.tri2=triangles[index+2u];return out;
 }
 fn shade(in:Out)->vec4<f32> {
     if ((material.flags & 2u)==0u) { return in.colour; }
@@ -57,12 +60,12 @@ struct FrameOut {@location(0) colour:vec4<f32>,@builtin(frag_depth) depth:f32}
 @fragment fn fs_frame(in:Out)->FrameOut {
     var out:FrameOut;out.colour=shade(in);
     let px=in.position.x-0.5;let py=in.position.y-0.5;
-    let a=material.tri0;let b=material.tri1;
+    let a=in.tri0;let b=in.tri1;
     let w0=((a.z-px)*(b.y-py)-(b.x-px)*(a.w-py))*b.z;
     let w1=((b.x-px)*(a.y-py)-(a.x-px)*(b.y-py))*b.z;
     let w2=1.0-w0-w1;
-    let delta=b.w*w1+material.tri2.x*w2;
-    out.depth=clamp(material.tri2.y+floor(delta),0.0,material.tri2.z)/16777216.0;
+    let delta=b.w*w1+in.tri2.x*w2;
+    out.depth=clamp(in.tri2.y+floor(delta),0.0,in.tri2.z)/16777216.0;
     return out;
 }
 @group(0) @binding(3) var<storage,read> decoded:array<u32>;
@@ -135,6 +138,8 @@ public:
             WGPUBufferDescriptor b=WGPU_BUFFER_DESCRIPTOR_INIT;b.size=120;b.usage=WGPUBufferUsage_Vertex|WGPUBufferUsage_CopyDst;
             vertex_=wgpuDeviceCreateBuffer(device_,&b);b.size=64;b.usage=WGPUBufferUsage_Uniform|WGPUBufferUsage_CopyDst;
             uniform_=wgpuDeviceCreateBuffer(device_,&b);
+            b.size=48;b.usage=WGPUBufferUsage_Storage|WGPUBufferUsage_CopyDst;
+            triangles_=wgpuDeviceCreateBuffer(device_,&b);vertex_capacity_=3;
         }
         if(w!=width_||h!=height_) {
             release_image();width_=w;height_=h;
@@ -153,23 +158,39 @@ public:
         for(auto &s:samplers_) {if(s)wgpuSamplerRelease(s);s=nullptr;}
         if(vertex_)wgpuBufferRelease(vertex_);
         if(uniform_)wgpuBufferRelease(uniform_);
+        if(triangles_)wgpuBufferRelease(triangles_);
         if(copy_)wgpuComputePipelineRelease(copy_);
         if(module_)wgpuShaderModuleRelease(module_);
-        vertex_=uniform_=nullptr;copy_=nullptr;module_=nullptr;device_=nullptr;
+        vertex_=uniform_=triangles_=nullptr;copy_=nullptr;module_=nullptr;device_=nullptr;
     }
     WGPUBuffer decoded() const {return decoded_;}
     // Input positions are raw GS screen coordinates, Z is an integer value.
     bool encode(WGPUQueue queue,WGPUCommandEncoder encoder,const Bridge &target,
                 const Vertex *input,const std::uint32_t *setup) {
+        return encode_many(queue,encoder,target,input,3,setup);
+    }
+    bool encode_many(WGPUQueue queue,WGPUCommandEncoder encoder,const Bridge &target,
+                     const Vertex *input,unsigned count,const std::uint32_t *setup) {
+        if(!count || count%3 || count>384)return false;
         Material m={setup[0],setup[7],setup[8],0,{}};
-        const auto &a=input[0],&b=input[1],&c=input[2];
-        auto area=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
-        if(!std::isfinite(area)||std::abs(area)<1e-8f)return false;
-        float tri[]={a.x,a.y,b.x,b.y,c.x,c.y,1/area,b.z-a.z,c.z-a.z,a.z,16777215.0f,0};
-        std::copy_n(tri,12,m.tri);
-        Vertex vertices[3];std::copy_n(input,3,vertices);
+        std::vector<Vertex> vertices(input,input+count);
+        std::vector<float> triangles(count*4);
+        for(unsigned i=0;i<count;i+=3) {
+            const auto &a=input[i],&b=input[i+1],&c=input[i+2];
+            auto area=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+            if(!std::isfinite(area)||std::abs(area)<1e-8f)return false;
+            float tri[]={a.x,a.y,b.x,b.y,c.x,c.y,1/area,b.z-a.z,c.z-a.z,a.z,16777215.0f,0};
+            std::copy_n(tri,12,triangles.data()+i*4);
+        }
+        if(count>vertex_capacity_) {
+            wgpuBufferRelease(vertex_);wgpuBufferRelease(triangles_);vertex_capacity_=count;
+            WGPUBufferDescriptor b=WGPU_BUFFER_DESCRIPTOR_INIT;b.size=count*40;b.usage=WGPUBufferUsage_Vertex|WGPUBufferUsage_CopyDst;
+            vertex_=wgpuDeviceCreateBuffer(device_,&b);b.size=count*16;b.usage=WGPUBufferUsage_Storage|WGPUBufferUsage_CopyDst;
+            triangles_=wgpuDeviceCreateBuffer(device_,&b);
+        }
         for(auto &v:vertices) {v.x=(v.x+0.5f)/target.width()*2-1;v.y=1-(v.y+0.5f)/target.height()*2;v.z/=16777216.0f;}
-        wgpuQueueWriteBuffer(queue,vertex_,0,vertices,sizeof vertices);wgpuQueueWriteBuffer(queue,uniform_,0,&m,sizeof m);
+        wgpuQueueWriteBuffer(queue,vertex_,0,vertices.data(),count*40);wgpuQueueWriteBuffer(queue,uniform_,0,&m,sizeof m);
+        wgpuQueueWriteBuffer(queue,triangles_,0,triangles.data(),count*16);
         auto layout=wgpuComputePipelineGetBindGroupLayout(copy_,0);
         WGPUBindGroupEntry ce[2]={};ce[0]=WGPU_BIND_GROUP_ENTRY_INIT;ce[0].binding=3;ce[0].buffer=decoded_;ce[0].size=WGPU_WHOLE_SIZE;
         ce[1]=WGPU_BIND_GROUP_ENTRY_INIT;ce[1].binding=4;ce[1].textureView=image_view_;
@@ -189,17 +210,17 @@ public:
             sd.magFilter=sd.minFilter=(sampler_index&4)?WGPUFilterMode_Linear:WGPUFilterMode_Nearest;
             samplers_[sampler_index]=wgpuDeviceCreateSampler(device_,&sd);
         }
-        WGPUBindGroupEntry e[3]={};for(unsigned i=0;i<3;++i) {e[i]=WGPU_BIND_GROUP_ENTRY_INIT;e[i].binding=i;}
-        e[0].textureView=image_view_;e[1].sampler=samplers_[sampler_index];e[2].buffer=uniform_;e[2].size=64;
-        bg.layout=layout;bg.entryCount=3;bg.entries=e;g=wgpuDeviceCreateBindGroup(device_,&bg);
+        WGPUBindGroupEntry e[4]={};for(unsigned i=0;i<4;++i) {e[i]=WGPU_BIND_GROUP_ENTRY_INIT;e[i].binding=i;}
+        e[0].textureView=image_view_;e[1].sampler=samplers_[sampler_index];e[2].buffer=uniform_;e[2].size=64;e[3].binding=5;e[3].buffer=triangles_;e[3].size=count*16;
+        bg.layout=layout;bg.entryCount=4;bg.entries=e;g=wgpuDeviceCreateBindGroup(device_,&bg);
         WGPURenderPassColorAttachment ca=WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
         ca.view=target.colour();ca.loadOp=WGPULoadOp_Load;ca.storeOp=WGPUStoreOp_Store;
         WGPURenderPassDepthStencilAttachment za=WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
         za.view=target.depth();za.depthLoadOp=WGPULoadOp_Load;za.depthStoreOp=WGPUStoreOp_Store;
         WGPURenderPassDescriptor rd=WGPU_RENDER_PASS_DESCRIPTOR_INIT;rd.colorAttachmentCount=1;rd.colorAttachments=&ca;rd.depthStencilAttachment=&za;
         auto rp=wgpuCommandEncoderBeginRenderPass(encoder,&rd);wgpuRenderPassEncoderSetPipeline(rp,p);
-        wgpuRenderPassEncoderSetBindGroup(rp,0,g,0,nullptr);wgpuRenderPassEncoderSetVertexBuffer(rp,0,vertex_,0,120);
-        wgpuRenderPassEncoderDraw(rp,3,1,0,0);wgpuRenderPassEncoderEnd(rp);wgpuRenderPassEncoderRelease(rp);
+        wgpuRenderPassEncoderSetBindGroup(rp,0,g,0,nullptr);wgpuRenderPassEncoderSetVertexBuffer(rp,0,vertex_,0,count*40);
+        wgpuRenderPassEncoderDraw(rp,count,1,0,0);wgpuRenderPassEncoderEnd(rp);wgpuRenderPassEncoderRelease(rp);
         wgpuBindGroupRelease(g);wgpuBindGroupLayoutRelease(layout);return true;
     }
 };

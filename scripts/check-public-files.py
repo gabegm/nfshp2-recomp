@@ -11,6 +11,8 @@ allowed = {
     'tools/native_triangle.hpp',
     'tools/native_triangle_test.cpp',
     'patches/native-triangle.patch',
+    'patches/native-batch.patch',
+    'tests/test_native_batch.py',
     '.gitignore', '.gitattributes', 'README.md', 'LICENSE', 'scripts/build.sh',
     'scripts/check-public-files.py',
     'scripts/play.sh', 'patches/runtime-compatibility.patch',

@@ -63,3 +63,6 @@
 !/tools/native_triangle.hpp
 !/tools/native_triangle_test.cpp
 !/patches/native-triangle.patch
+
+!/patches/native-batch.patch
+!/tests/test_native_batch.py

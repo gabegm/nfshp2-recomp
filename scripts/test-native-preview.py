@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check hardware rasterization against an analytic triangle; no game needed."""
+"""Check native rasterization, GPU handoff and batching; no game needed."""
 from pathlib import Path
 import struct
 import math
@@ -138,6 +138,8 @@ def main():
             assert result.returncode != 0
         print(f'Hardware triangle matches analytic colour/coverage at {checked} pixels; malformed meshes rejected.')
         print(run.stderr.strip())
+    for name in ('native-target-bridge-test', 'native-triangle-test'):
+        subprocess.run([str(BINARY.parent/name)], check=True, timeout=30)
 
 
 if __name__ == '__main__':

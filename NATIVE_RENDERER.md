@@ -1,8 +1,9 @@
 # Native renderer research
 
-The game still uses the verified compute-based GS renderer. The first native
-renderer milestone is optional instrumentation and geometry inspection; it
-does not replace any game rendering or claim an FPS improvement.
+The game still uses the verified compute-based GS renderer. Optional research
+paths now cover capture, GPU-only attachment handoff and
+selected native textured triangles/batches. They are disabled by default; no
+racing FPS improvement is claimed.
 
 ## Capture complete VU invocations
 
@@ -402,3 +403,68 @@ result before enabling broader replacement.
 The first captured post-handoff image also matched exactly in all six live
 selection tests. Small one-draw colour differences above were measured in VRAM
 immediately after the selected draw, rather than inferred from a later image.
+
+## Bounded native triangle batching (experimental)
+
+`native-batch.patch` can queue a bounded selection of compatible consecutive
+triangles and render each compatible run with one native draw, one texture
+decode and one colour/depth import/resolve. Triangle-specific depth planes are
+read in the vertex stage and passed as flat fragment inputs, so separate
+triangles retain their own integer-depth calculation within a single draw.
+
+```sh
+PS2_NATIVE_BATCH=3040,1400,128 bash scripts/play.sh --performance \
+  --load-state games/nfshp2/performance/race.ps2state --frames 3044 \
+  --press 3001:cross:44 --frames-dir "$PWD/.local/native-batch-check" --no-record
+```
+
+The selector is `emulation-frame,first-GPU-draw-ordinal,number-of-draws`.
+The selected window is capped at 4,096 draws; each native run is capped at 128
+triangles. Only matching complete setup descriptors can share a run. Ineligible
+draws retain GS rendering. `PS2_NATIVE_BATCH_SIZE=1` forces sequential native
+execution for comparison; values from 1 to 128 are supported (default 128).
+The batch selector is inactive when the single-triangle or bridge selector is
+also set. These remain diagnostics, without a normal launcher play option.
+
+Pending native runs drain before fallback draws, uploads, palette changes,
+texture flushes, local copies, presentation, downloads and save-state access.
+After a run, VRAM is authoritative again; the fallback never needs to interpret
+a stale native attachment. Setup changes and the end of the selected frame also
+end a run. If native preparation fails, queued original states/vertices replay
+through GS in order instead of dropping their geometry. The disabled draw hook
+keeps the large diagnostic queue record off the normal draw stack.
+
+Synthetic tests exercise the actual installed queue implementation: ordering,
+material changes, rejection, capacity, frame end, selection limits and fallback
+replay. Hardware tests now draw overlapping triangles within one native draw,
+checking every VRAM word against analytic colour, depth, coverage and preserved
+upper bytes across the seven depth/alpha cases.
+
+Private in-game comparisons produced these results:
+
+| Selected scene | Native triangles | Sequential native draws | Batched native draws | Largest batch |
+|---|---:|---:|---:|---:|
+| Early sky window | 11 | 11 | 3 | 5 |
+| Early world window | 128 | 128 | 9 | 21 |
+| Later world window | 33 | 33 | 4 | 14 |
+| Widescreen sky window | 29 | 29 | 5 | 9 |
+
+Batched and sequential native runs matched byte for byte in captured VRAM,
+material buffers, images, audio, guest RAM and complete save states. Against
+GS reference captures, the four windows had 352, 117, 1 and 535 differing
+colour words respectively, with maximum channel errors of 2, 2, 1 and 2.
+Depth and other VRAM words matched exactly. The menu and 2x selections accepted
+no native triangles and retained identical fallback output.
+
+These counts demonstrate lower native submission/texture/handoff work than
+sequential native execution. They do not compare racing FPS with the original
+GS renderer. Runs still end at material and palette changes; each new run
+imports and resolves a full framebuffer. Persistent authoritative attachments
+across those transitions, coherent texture caching, broader raster correctness
+and representative racing benchmarks remain necessary for a viable accelerated
+renderer. All defaults continue to use the established GS renderer.
+
+The final default-disabled comparison again matched images, guest RAM, audio
+and full save states in all six existing scenarios. The unit suite has 49
+passing tests; `scripts/test-native-preview.py` runs the original material/frame
+checks plus both new hardware handoff and batching executables after building.

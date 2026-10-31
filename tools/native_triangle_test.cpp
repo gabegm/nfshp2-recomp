@@ -89,7 +89,6 @@ int main() {
   const unsigned texel=0x80c08040;
   const unsigned initial_z[]={0x400000,0xc00000,0x800000,0x800000,0x400000,0x400000,0xc00000};
   const unsigned ztst[]={2,2,2,3,2,2,1};
-  const bool passes[]={true,false,true,false,true,false,true};
   for(unsigned test=0;test<7;++test) {
     const unsigned width=128,height=128;
     std::uint32_t s[40]={};s[0]=2|8192|2048|512|((test==4)?32:0)|((test==5)?64:0);
@@ -111,10 +110,13 @@ int main() {
     native_target::Vertex vertices[]={
       {16.25,8.25,128.0f/255,128.0f/255,128.0f/255,128.0f/255,0,0,1,8388608},
       {112.25,8.25,128.0f/255,128.0f/255,128.0f/255,128.0f/255,0,0,1,8388608},
-      {16.25,104.25,128.0f/255,128.0f/255,128.0f/255,128.0f/255,0,0,1,8388608}};
+      {16.25,104.25,128.0f/255,128.0f/255,128.0f/255,128.0f/255,0,0,1,8388608},
+      {32.25,16.25,128.0f/255,128.0f/255,128.0f/255,128.0f/255,0,0,1,10485760},
+      {96.25,16.25,128.0f/255,128.0f/255,128.0f/255,128.0f/255,0,0,1,10485760},
+      {32.25,80.25,128.0f/255,128.0f/255,128.0f/255,128.0f/255,0,0,1,10485760}};
     auto encoder=wgpuDeviceCreateCommandEncoder(device,nullptr);
     CHECK(bridge.begin(queue,encoder,vram,table_buffer,s));
-    CHECK(triangle.encode(queue,encoder,bridge,vertices,s));
+    CHECK(triangle.encode_many(queue,encoder,bridge,vertices,6,s));
     bridge.finish(encoder,vram,table_buffer);
     wgpuCommandEncoderCopyBufferToBuffer(encoder,vram,0,readback,0,4u<<20);
     auto command=wgpuCommandEncoderFinish(encoder,nullptr);wgpuQueueSubmit(queue,1,&command);
@@ -125,17 +127,24 @@ int main() {
     while(!mapped)wgpuDevicePoll(device,true,nullptr);
     auto actual=static_cast<const std::uint32_t*>(wgpuBufferGetConstMappedRange(readback,0,4u<<20));CHECK(actual);
     for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x) {
-      if(!passes[test] || x<17 || y<9 || x+y>120)continue;
       auto page=((x/64)+(y/32)*(width/64))*8192;
       auto offset=(y%32)*64+x%64;
-      input[(s[30]+page+tables[offset])/4]=texel;
-      if(test!=4){auto &z=input[(s[35]+page+tables[2048+offset])/4];z=(z&0xff000000)|0x800000;}
+      auto &colour=input[(s[30]+page+tables[offset])/4];
+      auto &depth=input[(s[35]+page+tables[2048+offset])/4];
+      for(unsigned t=0;t<2;++t) {
+        const bool covered=t?(x>=33 && y>=17 && x+y<=112):(x>=17 && y>=9 && x+y<=120);
+        const unsigned z=t?0xa00000:0x800000;
+        const auto old=depth&0xffffff;
+        const bool depth_pass=ztst[test]==1 || (ztst[test]==2?z>=old:z>old);
+        if(!covered || !depth_pass || test==5)continue;
+        colour=texel;if(test!=4)depth=(depth&0xff000000)|z;
+      }
     }
     for(unsigned i=0;i<input.size();++i)if(actual[i]!=input[i]) {
       std::fprintf(stderr,"native triangle case %u VRAM word %u: %08x expected %08x\n",test,i,actual[i],input[i]);fail("VRAM mismatch");
     }
     wgpuBufferUnmap(readback);wgpuCommandBufferRelease(command);wgpuCommandEncoderRelease(encoder);
-    std::printf("Native textured triangle case %u: all 4 MB match analytic colour/depth/coverage\n",test);
+    std::printf("Native two-triangle batch case %u: all 4 MB match analytic colour/depth/coverage\n",test);
   }
   triangle.reset();
   bridge.reset();wgpuBufferRelease(readback);wgpuBufferRelease(table_buffer);wgpuBufferRelease(vram);
