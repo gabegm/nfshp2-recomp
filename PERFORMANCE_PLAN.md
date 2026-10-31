@@ -64,7 +64,7 @@ The early race needs roughly a 15% reduction in average time per guest vblank
 just to reach 60, plus headroom to handle spikes. Hardware insufficiency is not
 yet established: different scenes behave differently on the same hardware.
 
-## Milestone 2: measure useful native coverage (in progress)
+## Milestone 2: measure useful native coverage (completed)
 
 Classify accepted GS primitives with the actual native renderer guard, then
 associate eligibility counts with per-dispatch GPU timestamps. Report fully
@@ -73,12 +73,42 @@ batch's GPU time by its triangle count or bounding-box area. Intrusive GPU
 profiling is separate from windowed performance measurements and cannot be
 interpreted as ordinary frame time.
 
-Completion: identify substantial expensive raster work the native path can
-replace, and the material/palette/fallback transitions that would force it to
-resolve. Existing evidence is about 75% raster share of measured compute time;
-this says neither that 75% of total frame time is removable nor that the current
-native subset covers that work. If eligible work is small, investigate the
-expensive rejected states before expanding renderer infrastructure.
+Measured 120 guest-vblank windows with `PS2_NATIVE_COVERAGE=1` and the GPU
+profiler. Raster metadata is classified per accepted primitive using the actual
+native guard, not inferred from a batch's first setup. Fully eligible raster
+batches are timed directly; mixed batches provide only an upper bound on work
+that includes eligible primitives.
+
+| Scene | Eligible primitives | Fully eligible raster time | Including all mixed raster time | Fully eligible compute time |
+|---|---:|---:|---:|---:|
+| Early race | 52.1% | 18.8% | 41.4% | 14.0% |
+| Later race | 49.6% | 14.0% | 43.2% | 9.7% |
+| Widescreen race | 52.5% | 21.3% | 45.3% | 15.5% |
+| Menu | 0.0% | 0.0% | 0.0% | 0.0% |
+
+These are intrusive dispatch timings, not ordinary frame-time shares or
+predicted speedups. Native execution and ownership transfers still have costs.
+A narrow existing-subset implementation cannot be assumed to recover the
+roughly 15% of whole-frame time needed in the early race. Mixed-dispatch costs
+must be measured more precisely before deciding whether that subset is enough.
+
+The early unsupported raster time is grouped by uniform target formats:
+23.2% of total raster time uses PSMCT32/PSMZ16S, 18.9% PSMCT32/PSMZ24,
+11.7% PSMCT16/PSMZ16 and 4.7% PSMCT16/PSMZ16S. Opaque and masked/blended
+triangle states appear among the expensive batches. Texture/flag hints in the
+report describe only a batch's first setup and cannot establish every reason
+for rejection. The menu's sampled raster work uses PSMZ16S, which the current
+native bridge rejects; its measured normal-play speed is already near full.
+
+The next investigation should therefore inventory *all* rejection causes in
+expensive racing states and test the benefit of moving the opaque part of mixed
+batches. Use that evidence alongside persistent attachment work. Do not blindly
+implement broad native blending or declare the remaining limit to be hardware.
+See [NATIVE_RENDERER.md](NATIVE_RENDERER.md) for commands and profile schema.
+Diagnostic instrumentation is compiled into a separate runner: normal 4:3 and widescreen executables retain
+exactly their pre-coverage hashes. This avoids relying on noisy disabled-hook
+benchmarks to argue that instrumentation has zero cost. The regular benchmark
+runner refuses the diagnostic build, even when its runtime coverage flag is off.
 
 ## Milestone 3: keep native attachments authoritative across materials
 
@@ -129,3 +159,33 @@ Do not change guest clocks, skip required work, mute sound or count repeated
 presentations to manufacture a speedup. Preserve the reference renderer and
 commit each validated milestone. Keep ROMs, assets, generated code, captures,
 save states and binaries out of the public repository.
+
+## PCSX2 control measurement
+
+A same-hardware PCSX2 run is a useful external control, not an interchangeable
+benchmark or a replacement for profiling this runtime. This machine has the
+Flatpak PCSX2 v2.8.2 installed. The inspected global settings use 1x resolution,
+a 100% normal-speed target, and no widescreen patches; performance overlays
+are off. Per-game settings can override globals, so verify effective settings
+in a running game. No PCSX2 racing result has been recorded yet.
+
+Use the same lawfully owned US disc, AC power, Vulkan hardware rendering,
+1x resolution, original guest clocks, normal 100% speed, and no optional game
+speed patches/cheats. Keep ordinary per-game compatibility fixes. Start with
+4:3; repeat widescreen separately. Use the same track (Coastal Parklands),
+car/camera and race-start conditions as closely as possible. Warm the shaders,
+then repeat two-minute racing segments without running the recomp alongside.
+Record speed percentage, image pacing/audio and available EE/GS performance
+readings. Do not equate the game's image FPS with emulation speed.
+
+If PCSX2 sustains 100% where this runtime runs at about 85%, that establishes
+that another implementation can run the game at full speed on this machine;
+it does not prove which subsystem or code change will fix this runtime. If
+both slow down, investigate their CPU/GPU/presentation costs, effective settings
+and sustained thermal behaviour before concluding the hardware is insufficient.
+Save states are implementation-specific, so the recomp's checkpoints cannot
+supply an identical PCSX2 starting state. Record this comparability limit.
+Keep BIOS files, ROMs, emulator logs, saves and any captures private. For an
+isolated future test profile, PCSX2's [documented `-datapath` option](https://github.com/PCSX2/pcsx2/blob/v2.8.2/pcsx2-qt/QtHost.cpp)
+selects a separate application data directory; no global settings were edited
+for this investigation.

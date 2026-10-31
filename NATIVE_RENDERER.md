@@ -468,3 +468,72 @@ The final default-disabled comparison again matched images, guest RAM, audio
 and full save states in all six existing scenarios. The unit suite has 49
 passing tests; `scripts/test-native-preview.py` runs the original material/frame
 checks plus both new hardware handoff and batching executables after building.
+
+## Native eligibility weighted by GPU dispatch timings
+
+`native-coverage.patch` adds optional CPU-side eligibility counters to the
+existing per-dispatch GPU profiler. It uses the exact production native guard
+and vertex checks for each primitive accepted into a GS batch. It does not
+replace any draw, change shader work, or read back additional game buffers.
+The hook is compiled only into a separate diagnostic runner. Ordinary builds
+exclude its fields, counters and branches entirely. The validated ordinary
+4:3 and widescreen binaries match their pre-instrumentation SHA256 hashes.
+The diagnostic runner additionally requires `PS2_NATIVE_COVERAGE=1`; its
+temporary setup and vertex objects remain outside the ordinary draw stack.
+
+```sh
+python3 scripts/build-native-coverage.py
+mkdir -p .local/native-coverage
+root="$PWD"
+(
+  cd .local/ps2-native-recomp
+  export LD_LIBRARY_PATH="$root/.local/deps/lib64:$root/.local/deps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  PS2_NATIVE_COVERAGE=1 PS2_NO_VU_THREAD=1 PS2_DECODE=0 PS2_SCALE=1 \
+  PS2_TILE=4 PS2_LOOK=crisp PS2_RASTER_SPECIALIZE=1 \
+  PS2_RACE_SPECIALIZE=1 PS2_CLUT_REUSE=1 \
+  PS2_GPU_PROFILE="3040,3160,$root/.local/native-coverage/dispatches.txt" \
+    "$root/.local/native-coverage-build/nfshp2/ps2run" \
+    games/nfshp2/disc/SLUS_203.62 --disc games/nfshp2/disc.iso \
+    --load-state games/nfshp2/performance/race.ps2state --frames 3164 \
+    --press 3001:cross:164 --frames-dir "$root/.local/native-coverage/images" \
+    --frame-every 3164 --rtc 1700000000 --no-record
+)
+python3 scripts/analyze-native-coverage.py \
+  .local/native-coverage/dispatches.txt \
+  --output .local/native-coverage/summary.json
+```
+
+The Linux build helper enables the CMake option
+`PS2_NATIVE_COVERAGE_DIAGNOSTIC` in an independent runtime directory, reuses
+already-built game objects, and links a separate executable without replacing
+the ordinary one. `--widescreen` uses the matching existing widescreen build.
+It invokes a validated linker argument list without a shell and keeps linker
+dependency output private, too. Diagnostic executables print a permanent marker;
+the ordinary benchmark runner rejects them even with coverage disabled.
+
+This is an intrusive timing/correctness run, not a windowed performance
+benchmark. Use a single-thread arrangement for reproducible frame labels.
+The existing eight raster metadata fields are followed by `native`, the
+eligible primitive count, summed clipped bounding-box area, and eligible
+bounding-box area. Areas use 64-bit counters, can overlap, and do not count
+actual shaded fragments. The ordinary profiler format is unchanged without
+the coverage flag. Do not combine coverage measurement with native replacement,
+custom shaders or skip/replay experiments.
+
+The analyzer reports fully eligible, mixed and unsupported dispatch time.
+It never estimates a mixed dispatch's eligible time from its primitive count
+or bounding-box area. Its state hints refer to the first setup; they are not
+an exhaustive rejection analysis. Profiles and summaries remain private.
+
+The 120-vblank race windows found roughly half the primitives eligible, but
+only 14–21% of raster time in fully eligible batches. Including the entirety
+of mixed batches gives upper bounds of 41–45% of raster time; the actual
+eligible fraction is unknown within those mixed batches. The sampled menu had
+no eligible primitives. Detailed scene results and the resulting priorities
+are in [PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md).
+
+Coverage-enabled profiling retained byte-identical images, guest RAM, raw audio
+and full save states against archived binaries across the 600-frame early race,
+120-frame later/menu/widescreen samples, and 24-frame 2x/predecode samples.
+Synthetic tests check timing bounds, malformed metadata and the actual runtime
+accumulator, including areas greater than 32 bits.

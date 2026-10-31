@@ -29,7 +29,7 @@ class BenchmarkTests(unittest.TestCase):
 
     def test_failed_software_or_instrumented_run_is_rejected(self):
         for log in [LOG.replace('frame limit reached','user quit'),LOG.replace('Intel UHD test','llvmpipe'),
-                    LOG+'[gpu] error validation\n',LOG+'[native-batch] 32 triangles\n',
+                    LOG+'[gpu] error validation\n',LOG+'[native-batch] 32 triangles\n', LOG+'[native-coverage-build] diagnostic\n',
                     LOG.replace('(alsa)','(dummy)'),LOG.replace('[audio] sound device synthetic (alsa): 48000 Hz\n','')]:
             with self.subTest(log=log):
                 with self.assertRaises(ValueError):b.summarize(self.content(),100,10,2,log)

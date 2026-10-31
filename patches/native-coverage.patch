@@ -1,0 +1,142 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -122,9 +122,23 @@
+     return c.specialized ? c.specialized : g_pipelines[c.pipeline];
+ }
+ 
++#ifdef PS2_NATIVE_COVERAGE_DIAGNOSTIC
++const bool g_native_coverage = [] {
++    const auto *value=std::getenv("PS2_NATIVE_COVERAGE");
++    return value && std::strcmp(value,"1")==0;
++}();
++struct NativeCoverage {
++    std::uint64_t eligible = 0, bbox = 0, eligible_bbox = 0;
++};
++#else
++#endif
+ struct CommandInfo {
+     std::size_t index;
+     std::uint32_t values[8];
++#ifdef PS2_NATIVE_COVERAGE_DIAGNOSTIC
++    NativeCoverage native;
++#else
++#endif
+ };
+ std::vector<CommandInfo> g_command_info;
+ 
+@@ -222,6 +236,11 @@
+     }
+ };
+ 
++#ifdef PS2_NATIVE_COVERAGE_DIAGNOSTIC
++NativeCoverage g_native_batch_coverage;
++
++#else
++#endif
+ struct Batch {
+     std::vector<std::uint32_t> prims;
+     std::vector<std::uint32_t> setups;
+@@ -641,7 +660,12 @@
+     const std::uint32_t *first = b.setups.data();
+     std::uint32_t textured = 0;
+     for (std::uint32_t i = 0; i < prims; ++i) textured += (b.setups[b.prims[i * kPrimWords] * kSetupWords] & 2u) ? 1u : 0u;
++#ifdef PS2_NATIVE_COVERAGE_DIAGNOSTIC
++    g_command_info.push_back({g_commands.size(), {prims, tiles, entries, snapshot, b.prims[1], first[3] | (first[14] << 8) | (first[6] << 16), first[0], textured}, {}});
++    if (g_native_coverage) g_command_info.back().native=g_native_batch_coverage;
++#else
+     g_command_info.push_back({g_commands.size(), {prims, tiles, entries, snapshot, b.prims[1], first[3] | (first[14] << 8) | (first[6] << 16), first[0], textured}});
++#endif
+ }
+ 
+ void flush_batch() {
+@@ -732,6 +756,10 @@
+     mark_rendered(pages(b.fbp, b.fbw, b.fpsm, b.minx, b.miny, b.maxx, b.maxy));
+     if (b.zwrite) mark_rendered(pages(b.zbp, b.fbw, b.zpsm, b.minx, b.miny, b.maxx, b.maxy));
+     b.prims.clear();
++#ifdef PS2_NATIVE_COVERAGE_DIAGNOSTIC
++    if (g_native_coverage) g_native_batch_coverage={};
++#else
++#endif
+     b.setups.clear();
+     b.boxes.clear();
+     g_batch_reads.clear();
+@@ -1000,8 +1028,18 @@
+             while (info < g_command_info.size() && g_command_info[info].index < i) ++info;
+             std::fprintf(g_profile_out, "%llu %u %s %llu %u %u", static_cast<unsigned long long>(frame_count()), i, kEntryPoints[g_commands[i].pipeline],
+                          static_cast<unsigned long long>(t[i * 2 + 1] > t[i * 2] ? timestamp_ns(t[i * 2 + 1] - t[i * 2]) : 0), g_commands[i].x, g_commands[i].y);
++#ifdef PS2_NATIVE_COVERAGE_DIAGNOSTIC
++            if (info < g_command_info.size() && g_command_info[info].index == i) {
++                for (std::uint32_t v : g_command_info[info].values) std::fprintf(g_profile_out, " %u", v);
++                if (g_native_coverage) {
++                    const auto &coverage=g_command_info[info].native;
++                    std::fprintf(g_profile_out," native %llu %llu %llu",static_cast<unsigned long long>(coverage.eligible),static_cast<unsigned long long>(coverage.bbox),static_cast<unsigned long long>(coverage.eligible_bbox));
++                }
++            }
++#else
+             if (info < g_command_info.size() && g_command_info[info].index == i)
+                 for (std::uint32_t v : g_command_info[info].values) std::fprintf(g_profile_out, " %u", v);
++#endif
+             std::fprintf(g_profile_out, "\n");
+         }
+         wgpuBufferUnmap(g_profile_read);
+@@ -1759,6 +1797,10 @@
+     g_timestamp_period = 1.0;
+ #endif
+ 
++#ifdef PS2_NATIVE_COVERAGE_DIAGNOSTIC
++    std::fprintf(stderr,"[native-coverage-build] diagnostic executable; not a normal-play benchmark\n");
++#else
++#endif
+     if (const std::string spec = os::env("PS2_GPU_PROFILE"); !spec.empty()) {
+         char path[512] = {};
+         unsigned long long a = 0, z = 0;
+@@ -2062,6 +2104,25 @@
+     if (!std::isfinite(area) || std::abs(area)<1e-8f) return false;
+     return true;
+ }
++#ifdef PS2_NATIVE_COVERAGE_DIAGNOSTIC
++#if defined(_MSC_VER)
++__declspec(noinline)
++#elif defined(__GNUC__) || defined(__clang__)
++__attribute__((noinline))
++#endif
++void note_native_coverage(const State &st,const Vertex *vertices,int count,const std::uint32_t *rec) {
++    const auto width=static_cast<std::uint64_t>((rec[3]&65535u)-(rec[2]&65535u)+1);
++    const auto height=static_cast<std::uint64_t>((rec[3]>>16)-(rec[2]>>16)+1);
++    const auto bbox=width*height;
++    g_native_batch_coverage.bbox+=bbox;
++    std::uint32_t setup[kSetupWords]={};native_target::Vertex input[3];
++    if (native_triangle_input(st,vertices,count,setup,input)) {
++        ++g_native_batch_coverage.eligible;
++        g_native_batch_coverage.eligible_bbox+=bbox;
++    }
++}
++#else
++#endif
+ bool render_native_triangles(const std::uint32_t *setup, const native_target::Vertex *input, unsigned count) {
+     flush_all();submit();
+     const auto width = 1u << (setup[15] & 255u), height = 1u << (setup[15] >> 8);
+@@ -2396,6 +2457,10 @@
+     rec[0] = setup_index;
+     rec[2] = static_cast<std::uint32_t>(minx) | (static_cast<std::uint32_t>(miny) << 16);
+     rec[3] = static_cast<std::uint32_t>(maxx) | (static_cast<std::uint32_t>(maxy) << 16);
++#ifdef PS2_NATIVE_COVERAGE_DIAGNOSTIC
++    if (g_native_coverage) note_native_coverage(st,v,count,rec);
++#else
++#endif
+     b.prims.insert(b.prims.end(), rec, rec + kPrimWords);
+     b.boxes.push_back(rec[2]);
+     b.boxes.push_back(rec[3]);
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -115,6 +115,10 @@
+         DEPENDS runtime/src/gs/gpu/blit.wgsl cmake/embed.cmake)
+     if(NOT PS2_PREBUILT)
+         target_sources(ps2runtime PRIVATE runtime/src/gs/gpu/gpu.cpp "${PS2_GS_WGSL}" "${PS2_BLIT_WGSL}")
++        option(PS2_NATIVE_COVERAGE_DIAGNOSTIC "Build optional native coverage profiling into gpu.cpp" OFF)
++        if(PS2_NATIVE_COVERAGE_DIAGNOSTIC)
++            set_property(SOURCE runtime/src/gs/gpu/gpu.cpp APPEND PROPERTY COMPILE_DEFINITIONS PS2_NATIVE_COVERAGE_DIAGNOSTIC=1)
++        endif()
+     endif()
+     target_compile_definitions(ps2runtime ${PS2_API} PS2_GPU)
+     if(EMSCRIPTEN)

@@ -70,3 +70,9 @@
 !/PERFORMANCE_PLAN.md
 !/scripts/benchmark-performance.py
 !/tests/test_performance_benchmark.py
+
+!/patches/native-coverage.patch
+!/scripts/analyze-native-coverage.py
+!/tests/test_native_coverage.py
+
+!/scripts/build-native-coverage.py

@@ -55,7 +55,7 @@ def summarize(content, start, frames, warmup, log):
         raise ValueError('A real audio device is required for playback benchmarks.')
     if '[gpu] error' in log:
         raise ValueError('GPU errors invalidate the benchmark.')
-    if re.search(r'^\[(native-triangle|native-batch|native-target|native-capture)\]', log, re.M):
+    if re.search(r'^\[(native-triangle|native-batch|native-target|native-capture|native-coverage-build)\]', log, re.M):
         raise ValueError('Experimental rendering/captures invalidate a baseline run.')
     rate = 1000*len(selected)/wall
     # Two adjacent guest vblanks avoid treating the game's alternating render/
