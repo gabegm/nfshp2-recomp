@@ -35,6 +35,8 @@ allowed = {
     'scripts/prepare-native-material.py',
     'tests/test_native_material.py',
     'patches/native-draw-capture.patch',
+    'patches/native-frame-proof.patch',
+    'scripts/compare-native-frame.py',
     'patches/vu-census.patch',
     'tests/test_widescreen.py',
     'scripts/nointro.py',

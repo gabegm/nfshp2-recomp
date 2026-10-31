@@ -103,3 +103,63 @@ class NativeMaterialTests(unittest.TestCase):
             with self.assertRaises(ValueError):helper.prepare(root)
             (root/'vram.bin').write_bytes(b'\0'*4)
             with self.assertRaises(ValueError):helper.prepare(root)
+
+
+def frame_fixture(root):
+    state,draw=fixture(root)
+    state[0]|=2048|512
+    state[2]=1;state[6]=0x31;state[23]=0xFFFFFF;state[7]=2<<8
+    state[10]=state[11]=63<<16
+    state[25:30]=[0x10000,1,0,6|(5<<4),0xFFFFFFFF]
+    state[30:35]=[0,1,0,6|(5<<4),0xFFFFFFFF]
+    state[35:40]=[0x8000,1,0,6|(5<<4),0xFFFFFF]
+    put_words(root/'setup.bin',state);put_words(root/'tables.bin',[i*4 for i in range(2048)])
+    vram=bytearray((root/'vram.bin').read_bytes());struct.pack_into('<I',vram,0x10000,0x80402010)
+    (root/'vram.bin').write_bytes(vram);(root/'vram-after.bin').write_bytes(vram)
+    return state,draw
+
+
+class NativeFrameTests(unittest.TestCase):
+    def test_frame_proof_header_and_initial_surfaces(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);frame_fixture(root)
+            data=helper.prepare_frame(root).read_bytes()
+            self.assertEqual(struct.unpack_from('<4sI',data),(b'NFM3',3))
+            self.assertEqual(struct.unpack_from('<3I',data,28),(64,64,0xFFFFFF))
+            self.assertEqual(len(data),40+3*40+4+64*64*8)
+            self.assertEqual(len((root/'frame-before.rgba').read_bytes()),64*64*4)
+            self.assertEqual((root/'frame-before.rgba').read_bytes(),(root/'frame-reference.rgba').read_bytes())
+
+    def test_unsupported_frame_states_and_feedback_are_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);base,draw=frame_fixture(root)
+            cases=[]
+            for index,value in ((3,2),(4,255),(6,0x30),(23,0),(10,1|(63<<16)),(25,0),(35,0)):
+                state=base.copy();state[index]=value;cases.append(state)
+            state=base.copy();state[0]|=128;cases.append(state)
+            state=base.copy();state[0]|=8;state[7]|=1<<14;cases.append(state)  # Destination blending.
+            state=base.copy();state[0]|=64;state[7]|=1<<4;cases.append(state)
+            for state in cases:
+                put_words(root/'setup.bin',state)
+                with self.subTest(state=state[:11]),self.assertRaises(ValueError):helper.prepare_frame(root)
+
+    def test_native_comparison_counts_colour_masks_and_depth(self):
+        spec=importlib.util.spec_from_file_location('native_compare',ROOT/'scripts/compare-native-frame.py')
+        comparison=importlib.util.module_from_spec(spec);spec.loader.exec_module(comparison)
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);header=struct.pack('<4s9I',b'NFM3',3,1,1,0,0,0,2,2,15)
+            (root/'frame-triangle.nfm').write_bytes(header)
+            (root/'frame-before.rgba').write_bytes(b'\0'*16)
+            reference=bytes([10,20,30,40])+b'\0'*12
+            (root/'frame-reference.rgba').write_bytes(reference)
+            image=root/'native.ppm';native=bytes([11,20,30,40,5,0,0,0])+b'\0'*8
+            Path(str(image)+'.rgba').write_bytes(native)
+            put_words(root/'depth-reference.u32',[7,0,0,0])
+            Path(str(image)+'.depth').write_bytes(struct.pack('<4f',7/15,0,0,0))
+            result=comparison.compare(root,image)
+            self.assertEqual(result['reference_changed_pixels'],1)
+            self.assertEqual(result['native_changed_pixels'],2)
+            self.assertEqual(result['changed_mask_difference'],1)
+            self.assertEqual(result['rgba_different_pixels'],2)
+            self.assertEqual(result['rgba_max_channel_error'],5)
+            self.assertEqual(result['depth_different_pixels'],0)

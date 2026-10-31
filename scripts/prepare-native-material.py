@@ -116,8 +116,89 @@ def prepare(folder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('capture', type=Path)
+    parser.add_argument('--framebuffer',action='store_true',help='Prepare a guarded one-draw colour/depth proof.')
     args = parser.parse_args()
-    print(prepare(args.capture))
+    print(prepare_frame(args.capture) if args.framebuffer else prepare(args.capture))
 
+
+
+# Framebuffer proof helpers are intentionally separate from the material-only
+# preview. They reject states that need destination blending or unsupported
+# colour/depth representations rather than approximating those states.
+def image_words(fmt, width, height, vram, tables):
+    output = array('I')
+    for y in range(height):
+        for x in range(width):
+            word, shift, mask = address(fmt, x, y, tables)
+            if word >= len(vram):raise ValueError('Framebuffer address outside capture.')
+            output.append((vram[word] >> shift) & mask)
+    return output
+
+
+def little_bytes(values):
+    output = array('I', values)
+    if sys.byteorder != 'little':output.byteswap()
+    return output.tobytes()
+
+
+def prepare_frame(folder):
+    material_file = prepare(folder)
+    material = material_file.read_bytes()
+    capture = json.loads((folder/'draw.json').read_text())
+    setup = words(folder/'setup.bin',40)
+    before, after = words(folder/'vram.bin',1<<20), words(folder/'vram-after.bin',1<<20)
+    tables = words(folder/'tables.bin')
+    flags, modes = setup[0],setup[7]
+    if setup[3] != 0 or setup[4] != 0 or setup[6] != 0x31 or setup[23] != 0xFFFFFF:
+        raise ValueError('Frame proof requires an unmasked PSMCT32 framebuffer and PSMZ24 depth.')
+    if not flags & 2048 or flags & (4|128|4096) or (modes>>28)&3:
+        raise ValueError('Frame proof does not support fog, DATE/FBA, scan masking or unclamped colour.')
+    alpha=(modes>>12)&255
+    if flags & 8 and ((alpha&3)!=((alpha>>2)&3) or ((alpha>>6)&3)!=0):
+        raise ValueError('Frame proof requires source-pass blending.')
+    if flags & 64 and (modes>>4)&3:
+        raise ValueError('Frame proof requires KEEP alpha failure.')
+    width, height = setup[2]*64, (setup[11]>>16)+1
+    if not 0<width<=2048 or not 0<height<=2048 or width*height>1<<20:
+        raise ValueError('Framebuffer exceeds proof limits.')
+    if (setup[10]&65535) or (setup[11]&65535) or (setup[10]>>16)!=width-1:
+        raise ValueError('Frame proof requires a full, zero-origin scissor.')
+    def region(fmt,w,h):
+        px,py=fmt[3]&15,(fmt[3]>>4)&15
+        end=fmt[0]+(((w-1)>>px)+((h-1)>>py)*fmt[1]+1)*8192
+        if end>1<<22:raise ValueError('Wrapped proof surfaces are unsupported.')
+        return fmt[0],end
+    tw,th=struct.unpack_from('<2I',material,8)
+    texture_region=region(setup[25:30],tw,th)
+    surfaces=[]
+    for fmt in (setup[30:35],setup[35:40]):
+        surface=region(fmt,width,height)
+        surfaces.append(surface)
+        if texture_region[0]<surface[1] and surface[0]<texture_region[1]:
+            raise ValueError('Framebuffer-feedback textures are unsupported by the frame proof.')
+    if surfaces[0][0]<surfaces[1][1] and surfaces[1][0]<surfaces[0][1]:
+        raise ValueError('Aliased colour/depth surfaces are unsupported by the frame proof.')
+    colour=image_words(setup[30:35],width,height,before,tables)
+    reference=image_words(setup[30:35],width,height,after,tables)
+    depth=image_words(setup[35:40],width,height,before,tables)
+    reference_depth=image_words(setup[35:40],width,height,after,tables)
+    (folder/'frame-before.rgba').write_bytes(little_bytes(colour))
+    (folder/'frame-reference.rgba').write_bytes(little_bytes(reference))
+    (folder/'depth-before.u32').write_bytes(little_bytes(depth))
+    (folder/'depth-reference.u32').write_bytes(little_bytes(reference_depth))
+    depth_floats=b''.join(struct.pack('<f',z/setup[23]) for z in depth)
+    vertices=bytearray()
+    for i,vertex in enumerate(capture['vertices']):
+        if vertex['z']>setup[23]:raise ValueError('Vertex depth clamping is unsupported by the frame proof.')
+        values=struct.unpack_from('<9f',material,28+i*36)
+        vertices+=struct.pack('<10f',*values,min(vertex['z'],setup[23])/setup[23])
+    texture=material[28+3*36:]
+    output=folder/'frame-triangle.nfm'
+    output.write_bytes(struct.pack('<4s9I',b'NFM3',3,tw,th,flags,modes,setup[8],width,height,setup[23])+vertices+texture+little_bytes(colour)+depth_floats)
+    (folder/'frame-proof.json').write_text(json.dumps(dict(version=1,width=width,height=height,mesh=output.name,
+        restrictions=['One source-pass triangle; PSMCT32 colour and PSMZ24 depth.',
+                      'No framebuffer-feedback textures, destination blending, DATE/FBA or fog.',
+                      'Standalone comparison only; the live renderer is unchanged.']),indent=2)+'\n')
+    return output
 
 if __name__ == '__main__':main()

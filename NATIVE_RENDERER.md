@@ -227,3 +227,82 @@ palette banks, alpha expansion, buffer bounds, flat colour/FST conversion and
 GPU-reference mismatch rejection. The hardware suite separately tests the
 conventional render pipeline. Both are required evidence before expanding
 this preview into an in-game path; neither establishes full-game compatibility.
+
+## One-draw framebuffer/depth proof
+
+`patches/native-frame-proof.patch` extends the optional snapshot with the
+reference VRAM immediately after the selected draw. The draw executes once;
+the hook captures around it and then returns to the original renderer. No
+native draw is inserted into gameplay.
+
+A fresh capture can be prepared and compared at its original screen coordinates:
+
+```sh
+python3 scripts/prepare-native-material.py .local/native-draw --framebuffer
+.local/native-preview/native-mesh-preview \
+  .local/native-draw/frame-triangle.nfm .local/native-preview/frame.ppm
+python3 scripts/compare-native-frame.py \
+  .local/native-draw .local/native-preview/frame.ppm
+```
+
+This NFM3 mode initializes native colour and depth attachments from the snapshot,
+then draws one textured triangle with hardware rasterization and depth testing.
+It accepts only a guarded subset: unmasked PSMCT32 colour, PSMZ24 depth,
+source-pass blending, a full zero-origin scissor, ordinary texture addressing,
+and KEEP alpha failure. It rejects destination blending, fog, DATE/FBA, scan
+masking, aliased surfaces, wrapped surfaces and framebuffer-feedback textures.
+An incompatible reflection/shadow draw was correctly rejected during testing.
+
+The native API forbids direct queue writes to Depth32Float textures. A depth-only
+fullscreen render pass initializes that attachment from a storage buffer instead.
+A separate fragment entry reproduces the reference's integer depth quantization
+before writing fragment depth. Native interpolated depth alone differed by one
+integer unit in some pixels; the explicit quantization removed those differences
+in the sampled draws. Its performance implications have not been measured.
+
+The private NFM3 file embeds one triangle, texture, initial RGBA framebuffer and
+normalized depth buffer. It starts with `NFM3` and nine little-endian words:
+vertex count, texture width/height, flags, modes, alpha reference, framebuffer
+width/height and integer depth maximum. Vertices contain ten floats (NFM2 fields
+plus normalized Z). Texture RGBA, initial framebuffer RGBA and initial float32
+depth follow. The preview writes PPM plus `.rgba` and `.depth` buffers for exact
+comparison; the helper saves `native-comparison.json` beside the private capture.
+
+Five sampled real draws produced these results:
+
+| Sample | Reference changed pixels | Native changed pixels | RGBA-different pixels | Maximum channel error | Depth differences |
+|---|---:|---:|---:|---:|---:|
+| Early A | 4,697 | 4,697 | 56 | 1 | 0 |
+| Early B | 360 | 360 | 10 | 1 | 0 |
+| Early C | 24 | 24 | 1 | 2 | 0 |
+| Later A | 10 | 10 | 0 | 0 | 0 |
+| Later B | 2 | 2 | 0 | 0 | 0 |
+
+Changed-pixel masks matched in all five. Those masks are not direct raster
+coverage measurements: unchanged colours or rejected fragments can conceal
+coverage differences. Colour differences remain from interpolation/filtering;
+this is not bit-exact native rendering or full-game validation.
+
+The hardware test also checks seven framebuffer cases: depth pass/reject,
+GEQUAL versus GREATER at equal depth, masked depth writes, alpha rejection and
+ALWAYS depth. Synthetic unit tests verify proof-state rejection, framebuffer
+layout and comparison metrics. The before/after capture hook retains matching
+images, audio, guest RAM and save states across the existing six scenarios,
+including a 600-frame early race; scale 2 continues to reject capture safely.
+
+The remaining in-game work is persistent native colour/depth resources, texture
+cache coherence and guarded transitions back to the GS renderer. The proof
+currently uploads and reads back captured buffers as an offline test. Moving
+that machinery into the game unchanged would add substantial overhead, so it
+must not be mistaken for an accelerated gameplay renderer.
+
+The final windowed FPS rerun could not complete: the archived baseline stalled
+at SDL window creation before GPU initialization, with both Wayland and X11.
+No new FPS conclusion is drawn for this final hook revision. Headless game
+comparisons, native hardware tests and patch-stack checks passed. Earlier
+capture-disabled measurements above remain separate from the offline proof.
+
+The native depth attachment represents the 24-bit depth values, not the unused
+upper byte of each PS2 Z24 word. A future live VRAM resolve must preserve those
+unrepresented bits and synchronize all fallback reads/writes. Matching the
+standalone depth comparison does not establish that live cache-coherence work.

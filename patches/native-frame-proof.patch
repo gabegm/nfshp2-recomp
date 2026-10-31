@@ -1,0 +1,88 @@
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -1894,31 +1894,33 @@
+ // Research-only snapshot, taken on the GS render thread before one draw.
+ // read_state flushes prior work and reads the actual GPU palette, not the
+ // software renderer's possibly stale VRAM/CLUT shadow.
++std::filesystem::path g_native_capture_root;
+ #if defined(_MSC_VER)
+ __declspec(noinline)
+ #elif defined(__GNUC__) || defined(__clang__)
+ __attribute__((noinline))
+ #endif
+-void capture_native_draw(const State &st, const Vertex *vertices, int count) {
++bool capture_native_draw(const State &st, const Vertex *vertices, int count) {
+     static const std::string spec = os::env("PS2_NATIVE_DRAW_CAPTURE");
+     static unsigned long long ordinal = 0;
+     static bool finished = false;
+-    if (spec.empty() || finished) return;
++    if (spec.empty() || finished) return false;
+     unsigned long long wanted_frame = 0, wanted_draw = 0;
+     char folder[1024] = {};
+-    if (std::sscanf(spec.c_str(), "%llu,%llu,%1023[^\n]", &wanted_frame, &wanted_draw, folder) != 3) return;
++    if (std::sscanf(spec.c_str(), "%llu,%llu,%1023[^\n]", &wanted_frame, &wanted_draw, folder) != 3) return false;
+     const auto frame = frame_count();
+-    if (frame != wanted_frame || ordinal++ != wanted_draw) return;
++    if (frame != wanted_frame || ordinal++ != wanted_draw) return false;
+     finished = true;
+     if (!os::env("PS2_GS_SHADER").empty() || !os::env("PS2_GPU_SKIP").empty() || !os::env("PS2_GPU_BENCH").empty()) {
+         std::fprintf(stderr, "[native-capture] use the built-in shader without skip/replay experiments\n");
+-        return;
+-    }
+-    if (g_scale != 1) { std::fprintf(stderr, "[native-capture] use internal scale 1 for this capture\n"); return; }
++        return false;
++    }
++    if (g_scale != 1) { std::fprintf(stderr, "[native-capture] use internal scale 1 for this capture\n"); return false; }
+     const auto root = os::path(folder);
++    g_native_capture_root = root;
+     std::error_code error;
+     std::filesystem::create_directories(root, error);
+-    if (error) { std::fprintf(stderr, "[native-capture] cannot create directory\n"); return; }
++    if (error) { std::fprintf(stderr, "[native-capture] cannot create directory\n"); return false; }
+     std::vector<std::uint32_t> vram, palette, tables;
+     std::uint32_t scale = 1;
+     read_state(vram, scale, palette);
+@@ -1970,7 +1972,7 @@
+         g_arena.clear();
+     }
+     std::FILE *out = os::open((root / "draw.json").string().c_str(), "w");
+-    if (!out) { std::fprintf(stderr, "[native-capture] cannot write manifest\n"); return; }
++    if (!out) { std::fprintf(stderr, "[native-capture] cannot write manifest\n"); return false; }
+     std::fprintf(out, "{\"version\":1,\"frame\":%llu,\"ordinal\":%llu,\"scale\":%u,\"attr\":%llu,\"xyoffset\":[%u,%u],\"vertices\":[", static_cast<unsigned long long>(frame), wanted_draw, scale, static_cast<unsigned long long>(attr), static_cast<unsigned>(context.xyoffset & 65535u), static_cast<unsigned>((context.xyoffset >> 32) & 65535u));
+     for (int i = 0; i < count; ++i) {
+         const Vertex &v = vertices[i];
+@@ -1979,12 +1981,33 @@
+     std::fprintf(out, "]}\n");
+     std::fclose(out);
+     std::fprintf(stderr, "[native-capture] saved draw %llu of emulation frame %llu\n", wanted_draw, static_cast<unsigned long long>(frame));
++    return true;
++}
++#if defined(_MSC_VER)
++__declspec(noinline)
++#elif defined(__GNUC__) || defined(__clang__)
++__attribute__((noinline))
++#endif
++void capture_native_after() {
++        std::vector<std::uint32_t> vram, palette;
++        std::uint32_t scale = 1;
++        read_state(vram, scale, palette);
++        std::vector<std::uint8_t> bytes(vram.size() * 4);
++        for (std::size_t i = 0; i < vram.size(); ++i)
++            for (unsigned j = 0; j < 4; ++j) bytes[i * 4 + j] = static_cast<std::uint8_t>(vram[i] >> (j * 8));
++        std::ofstream after(g_native_capture_root / "vram-after.bin", std::ios::binary);
++        if (!after.write(reinterpret_cast<const char *>(bytes.data()), bytes.size())) std::fprintf(stderr, "[native-capture] reference write failed\n");
+ }
+ } // namespace
+ 
+ void draw(const State &st, const Vertex *v, int count) {
+     static const bool native_capture = std::getenv("PS2_NATIVE_DRAW_CAPTURE") != nullptr;
+-    if (native_capture) capture_native_draw(st, v, count);
++    if (native_capture && capture_native_draw(st, v, count)) {
++        // Capture is consumed before re-entry, so the primitive executes once.
++        draw(st, v, count);
++        capture_native_after();
++        return;
++    }
+     if (g_image.active && !g_image.pending.empty()) flush_image();
+     std::uint64_t attr = st.prim;
+     if (!(st.prmodecont & 1u)) attr = (st.prim & 7u) | (st.prmode & ~7ull);

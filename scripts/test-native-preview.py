@@ -10,6 +10,45 @@ ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / '.local/native-preview/native-mesh-preview'
 
 
+def check_framebuffers(folder):
+    source,output=folder/'frame.nfm',folder/'frame.ppm'
+    width=height=512;zmax=0xFFFFFF;vertex_z=0x800000
+    f32=lambda value:struct.unpack('<f',struct.pack('<f',value))[0]
+    background=bytes([10,20,30,40])*(width*height)
+    positions=[(64,64),(448,64),(64,448)]
+    texel=bytes([64,128,192,128])
+    cases=[('ge-pass',2,0x400000,False,False,True),
+           ('ge-reject',2,0xC00000,False,False,False),
+           ('ge-equal',2,0x800000,False,False,True),
+           ('gt-equal',3,0x800000,False,False,False),
+           ('depth-masked',2,0x400000,True,False,True),
+           ('alpha-reject',2,0x400000,False,True,False),
+           ('depth-always',1,0xC00000,False,False,True)]
+    for label,ztst,initial,masked,alpha_reject,passes in cases:
+        flags=2|8192|2048|512|(32 if masked else 0)|(64 if alpha_reject else 0)
+        data=struct.pack('<4s9I',b'NFM3',3,1,1,flags,ztst<<8,0,width,height,zmax)
+        for x,y in positions:data+=struct.pack('<10f',x,y,128/255,128/255,128/255,128/255,0,0,1,vertex_z/zmax)
+        data+=texel+background+struct.pack('<f',initial/zmax)*(width*height)
+        source.write_bytes(data)
+        run=subprocess.run([str(BINARY),str(source),str(output)],capture_output=True,text=True,timeout=30)
+        if run.returncode:raise RuntimeError(label+': '+run.stdout+run.stderr)
+        colour=Path(str(output)+'.rgba').read_bytes()
+        depth=Path(str(output)+'.depth').read_bytes()
+        assert len(colour)==len(depth)==width*height*4
+        for y in range(32,481,37):
+            for x in range(32,481,37):
+                if min(abs(x-64),abs(y-64),abs(x+y-512))<3:continue
+                covered=x>64 and y>64 and x+y<512
+                hit=covered and passes
+                expected=texel if hit else bytes([10,20,30,40])
+                actual=colour[(y*width+x)*4:(y*width+x)*4+4]
+                assert actual==expected,(label,x,y,actual,expected)
+                actual_depth=struct.unpack_from('<f',depth,(y*width+x)*4)[0]
+                expected_depth=f32((vertex_z if hit and not masked else initial)/zmax)
+                assert actual_depth==expected_depth,(label,x,y,actual_depth,expected_depth)
+        print(label,'matches framebuffer/depth checks')
+
+
 def main():
     vertices = [(-1, -1, 1, 0, 0), (1, -1, 0, 1, 0), (-1, 1, 0, 0, 1)]
     good = struct.pack('<4sI', b'NFM1', 3) + b''.join(struct.pack('<5f', *v) for v in vertices)
@@ -91,6 +130,7 @@ def main():
                     if ate and out_alpha<=200:expected=[0,0,0]
                     assert all(abs(a-e)<=3 for a,e in zip(actual,expected)),(label,x,y,actual,expected)
             print(label, 'matches analytic texture/material checks')
+        check_framebuffers(folder)
         for bad in (b'',  b'BAD!'+good[4:], good[:-1], good[:4]+struct.pack('<I', 4)+good[8:],
                     good[:8]+struct.pack('<f',float('nan'))+good[12:]):
             source.write_bytes(bad)
