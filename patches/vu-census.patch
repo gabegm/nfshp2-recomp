@@ -1,0 +1,185 @@
+--- a/runtime/src/vu_micro.cpp
++++ b/runtime/src/vu_micro.cpp
+@@ -14,6 +14,7 @@
+ 
+ #include "ps2/state.hpp"
+ 
++#include <algorithm>
+ #include <atomic>
+ #include <cmath>
+ #include <cstdio>
+@@ -433,6 +434,8 @@
+     if (index) r.vi[index] = static_cast<std::uint16_t>(value);
+ }
+ 
++void census_packet(const std::uint8_t *data, std::uint32_t qwords, std::uint32_t address);
++
+ void xgkick(Unit &u, std::uint32_t address) {
+     if (g_reference_dry) return;
+     std::uint8_t buffer[16 * 1024 + 16];
+@@ -454,6 +457,7 @@
+             std::memcpy(buffer + count * 16, qword(u, q), 16);
+         done = eop;
+     }
++    if (u.code == g_vu1_code) census_packet(buffer, count, address);
+     gif::transfer(1, buffer, count);
+ }
+ 
+@@ -736,6 +740,128 @@
+     return fn;
+ }
+ EntryCache g_entries[2048];
++
++namespace {
++
++// Optional, bounded native-renderer research capture. Files contain private
++// game data; callers must keep the selected directory out of publication.
++struct CensusCall;
++thread_local CensusCall *g_census_call = nullptr;
++struct CensusStats { std::uint32_t entry = 0; std::uint64_t calls = 0, kicks = 0, qwords = 0; };
++struct CensusConfig {
++    std::FILE *out = nullptr;
++    std::filesystem::path root;
++    std::uint64_t from = 0, frames = 1, calls = 0;
++    unsigned samples = 1, total_samples = 0;
++    std::uint64_t active_frame = ~0ull;
++    std::unordered_map<std::uint64_t, CensusStats> stats;
++    std::uint32_t generations[2048] = {};
++    std::uint64_t keys[2048] = {};
++    std::unordered_map<std::uint64_t, unsigned> captured;
++    CensusConfig() {
++        const auto folder = os::env("PS2_VU_CENSUS_DIR");
++        if (folder.empty()) return;
++        root = os::path(folder);
++        std::error_code error;
++        std::filesystem::create_directories(root, error);
++        if (error) { std::fprintf(stderr, "[vu-census] cannot create capture directory\n"); return; }
++        out = os::open((root / "calls.jsonl").string().c_str(), "w");
++        if (!out) { std::fprintf(stderr, "[vu-census] cannot open capture log\n"); return; }
++        from = std::strtoull(os::env("PS2_VU_CENSUS_FROM").c_str(), nullptr, 10);
++        if (const auto n = os::env("PS2_VU_CENSUS_FRAMES"); !n.empty()) frames = std::clamp<std::uint64_t>(std::strtoull(n.c_str(), nullptr, 10), 1, 600);
++        if (const auto n = os::env("PS2_VU_CENSUS_SAMPLES"); !n.empty()) samples = std::clamp<unsigned>(std::strtoul(n.c_str(), nullptr, 10), 0, 8);
++        std::fprintf(out, "{\"type\":\"header\",\"version\":1,\"clock\":\"emulation-frame-at-vu-call\"}\n");
++        std::fflush(out);
++    }
++    void next_frame(std::uint64_t frame) {
++        if (active_frame == frame) return;
++        for (const auto &[key, count] : stats)
++            std::fprintf(out, "{\"type\":\"summary\",\"frame\":%llu,\"key\":\"%016llX\",\"entry\":%u,\"calls\":%llu,\"kicks\":%llu,\"qwords\":%llu}\n", static_cast<unsigned long long>(active_frame), static_cast<unsigned long long>(key), count.entry, static_cast<unsigned long long>(count.calls), static_cast<unsigned long long>(count.kicks), static_cast<unsigned long long>(count.qwords));
++        stats.clear();
++        active_frame = frame;
++        std::fflush(out);
++    }
++    void bytes(const std::string &name, const void *data, std::size_t size) {
++        std::ofstream file(root / name, std::ios::binary);
++        if (!file.write(static_cast<const char *>(data), size)) std::fprintf(stderr, "[vu-census] capture write failed\n");
++    }
++    void registers(const std::string &name) {
++        // Explicit little-endian words, independent of C++ structure padding.
++        std::vector<std::uint8_t> bytes;
++        const auto word = [&](std::uint32_t w) { for (unsigned i = 0; i < 4; ++i) bytes.push_back(static_cast<std::uint8_t>(w >> (i * 8))); };
++        for (const auto &v : g_vu1.vf) for (auto w : v.w) word(w);
++        for (auto w : g_vu1.acc.w) word(w);
++        for (auto w : g_vu1.vi) word(w);
++        for (auto w : {g_vu1.q, g_vu1.p, g_vu1.i, g_vu1.r, g_vu1.mac, g_vu1.status, g_vu1.clip, g_vu1.cmsar0, g_vu1.tpc}) word(w);
++        this->bytes(name, bytes.data(), bytes.size());
++    }
++};
++struct CensusCall {
++    CensusConfig *config = nullptr;
++    CensusCall *previous = nullptr;
++    CensusStats *stats = nullptr;
++    std::uint64_t id = 0;
++    std::uint32_t kicks = 0;
++    std::string sample;
++    CensusCall(int unit, std::uint32_t pc) {
++        if (unit != 1 || g_reference_dry) return;
++        static CensusConfig census;
++        if (!census.out) return;
++        const auto frame = frame_count();
++        census.next_frame(frame);
++        if (frame < census.from || frame - census.from >= census.frames) return;
++        config = &census;
++        previous = g_census_call;
++        g_census_call = this;
++        id = ++config->calls;
++        pc &= 16383u;
++        const auto slot = pc >> 3;
++        if (config->generations[slot] != g_generation[1]) {
++            config->keys[slot] = program_key(g_vu1_code, reachable(g_vu1_code, 16383u, pc), pc);
++            config->generations[slot] = g_generation[1];
++        }
++        const auto key = config->keys[slot];
++        stats = &config->stats[key];
++        stats->entry = pc;
++        ++stats->calls;
++        if (config->total_samples < 128 && config->captured[key]++ < config->samples) {
++            ++config->total_samples;
++            char name[80];
++            std::snprintf(name, sizeof name, "%016llX_%04X_%llu", static_cast<unsigned long long>(key), pc, static_cast<unsigned long long>(id));
++            sample = name;
++            config->bytes(sample + "-code.bin", g_vu1_code, 16384);
++            config->bytes(sample + "-before.bin", g_vu1_mem, 16384);
++            config->registers(sample + "-regs-before.bin");
++        }
++        if (!sample.empty()) std::fprintf(config->out, "{\"type\":\"call\",\"id\":%llu,\"frame\":%llu,\"key\":\"%016llX\",\"entry\":%u,\"top\":%u,\"itop\":%u,\"sample\":\"%s\"}\n", static_cast<unsigned long long>(id), static_cast<unsigned long long>(frame), static_cast<unsigned long long>(key), pc, g_top, g_itop, sample.c_str());
++        std::fflush(config->out);
++    }
++    ~CensusCall() {
++        if (!config) return;
++        if (!sample.empty()) {
++            config->bytes(sample + "-after.bin", g_vu1_mem, 16384);
++            config->registers(sample + "-regs-after.bin");
++        }
++        if (!sample.empty()) std::fprintf(config->out, "{\"type\":\"end\",\"id\":%llu,\"kicks\":%u}\n", static_cast<unsigned long long>(id), kicks);
++        std::fflush(config->out);
++        g_census_call = previous;
++    }
++};
++void census_packet(const std::uint8_t *data, std::uint32_t qwords, std::uint32_t address) {
++    if (!g_census_call) return;
++    auto &call = *g_census_call;
++    std::string packet;
++    ++call.stats->kicks;
++    call.stats->qwords += qwords;
++    if (!call.sample.empty() && call.kicks < 32) packet = call.sample + "-kick" + std::to_string(call.kicks) + ".gif";
++    if (!packet.empty()) call.config->bytes(packet, data, static_cast<std::size_t>(qwords) * 16);
++    if (!call.sample.empty()) std::fprintf(call.config->out, "{\"type\":\"kick\",\"id\":%llu,\"index\":%u,\"address\":%u,\"qwords\":%u,\"packet\":\"%s\"}\n", static_cast<unsigned long long>(call.id), call.kicks, address, qwords, packet.c_str());
++    ++call.kicks;
++    std::fflush(call.config->out);
++}
++
++
++} // namespace
+ 
+ void code_changed(int unit) {
+     g_scan[unit & 1] = true;
+@@ -821,6 +947,19 @@
+ std::int64_t g_chained = -1;
+ std::uint64_t g_last_key = 0;
+ 
++// Keep the capture object off the ordinary VU call stack when disabled.
++void interpret_with_census(std::uint32_t pc) {
++    CensusCall census_call(1, pc);
++    g_chaining = true;
++    for (;;) {
++        run_entry(1, pc);
++        if (g_chained < 0) break;
++        pc = static_cast<std::uint32_t>(g_chained);
++        g_chained = -1;
++    }
++    g_chaining = false;
++}
++
+ void interpret(int unit, std::uint32_t pc) {
+     if (unit == 1 && g_capture) {
+         *g_capture = pc;
+@@ -834,6 +973,8 @@
+         g_chained = pc;
+         return;
+     }
++    static const bool census_wanted = std::getenv("PS2_VU_CENSUS_DIR") != nullptr;
++    if (census_wanted) { interpret_with_census(pc); return; }
+     g_chaining = true;
+     for (;;) {
+         run_entry(1, pc);
