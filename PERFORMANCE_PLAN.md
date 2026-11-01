@@ -317,8 +317,9 @@ and presentation while retaining this runtime's statically recompiled CPU.
 A separate private executable now connects the existing statically recompiled
 game/CPU objects to Play!'s GS backend through ordered registers and image
 transfers. The ordinary runtime sources and both installed play binaries remain
-unchanged. This adapter has no checkpoint support and currently presents through
-an SDL readback path; it is not installed in the public patch stack.
+unchanged. This adapter has no checkpoint support and initially presented through
+an SDL readback path; it is not installed in the public patch stack. A later
+direct-presentation experiment is described below.
 
 A 600-frame boot comparison matched guest RAM and audio exactly. Captured images
 were close but not byte-identical (maximum channel difference 3/255). A longer
@@ -349,3 +350,44 @@ hardware Vulkan and audio, and unresolved guest-state differences. They are
 screening results, not a validated comparison or a speedup. An earlier attempt
 with missing audio was rejected. Direct GPU presentation needs evaluation
 before judging the integrated backend's eventual performance.
+
+
+### Direct Vulkan presentation screening
+
+The private adapter now creates a native Vulkan surface before guest execution
+and presents GS memory directly, avoiding the SDL CPU-frame-readback path.
+The X11/XCB path passed a short windowed run and a capture of only the actual
+game window confirmed visible output. The Wayland surface code is untested;
+the installed SDL build selects X11. The host's legacy generic message still
+says “presenting through WebGPU”; the prototype marker identifies this separate
+Vulkan backend correctly.
+
+SDL startup intermittently blocks in `XIfEvent -> X11_ShowWindow` waiting for
+MapNotify, before GPU or game initialization. A debugger stack confirms this;
+the active desktop reported LockedHint=no and IdleHint=no. For the following
+diagnostic screen only, both renderers used the temporary
+`SDL_X11_FORCE_OVERRIDE_REDIRECT=1` setting. No installed launcher or global
+setting changed, and stalled attempts were excluded.
+
+Four sequential windowed runs alternated reference/prototype/prototype/reference
+from the same scripted boot, with real audio, fixed RTC/input and no captures
+or builds during measurement. Across guest frames 3040–3599:
+
+| Run | Guest vblanks/s | Adjacent two-vblank p99 (ms) |
+|---|---:|---:|
+| Reference A | 55.64 | 74.39 |
+| Direct Vulkan A | 58.86 | 44.77 |
+| Direct Vulkan B | 58.91 | 46.78 |
+| Reference B | 54.86 | 69.00 |
+
+No audio-starvation messages were recorded. The prototype reaches about 98.1%
+of the 60 Hz guest-speed target in this sample, with close aggregate primitive
+counts; it has not established full-speed racing. These are exploratory
+screening results under unmanaged windows, with the earlier GPU-readback and
+guest-state divergence unresolved. They are not accepted by the ordinary
+baseline benchmark and do not justify changing the default renderer.
+
+Next isolate the redundant frame submission at presentation, resolve the
+readback discrepancy, and implement checkpoint/shutdown/scale handling before
+making a public experimental game runner. The existing public smoke test is
+reproducible; the game adapter remains private and incomplete.
