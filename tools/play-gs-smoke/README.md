@@ -30,14 +30,15 @@ it back, comparing all 4,096 pixels against independently calculated values:
 32-bit and 16-bit colour, each with blending disabled and enabled. Blending
 uses `(Cs-Cd)*As/128+Cd`. No screenshots or approximate image comparisons are
 used. Additional cases check GREATER/GEQUAL depth comparisons in 32-bit,
-24-bit and both 16-bit layouts, direct-colour and indexed PSMT4 textures,
+24-bit and both 16-bit layouts, triangle coverage and exact interpolated depth
+in both winding orders, direct-colour and indexed PSMT4 textures,
 palette updates, and a reset/save/load round trip comparing all 4 MiB of VRAM
 and all GS registers. A subsequent draw samples the restored texture/palette
 without reuploading them. The CSM1 palette upload uses an 8-by-2 block.
 
 These cases passed on the UHD 620. Software-driver rejection also passed.
 This is a small correctness/feasibility test, not a performance benchmark or
-proof of complete GS compatibility. Triangle interpolation, mixed-format
+proof of complete GS compatibility. Broader interpolation cases, mixed-format
 aliasing, more complex alpha effects, display/presentation and the runtime
 adapter still need validation before game integration.
 

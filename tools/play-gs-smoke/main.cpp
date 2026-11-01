@@ -234,6 +234,35 @@ void textureCase(SmokeGS& gs, bool indexed, unsigned paletteVersion=0, bool uplo
     auto label=indexed ? "PSMT4 palette version "+std::to_string(paletteVersion) : "PSMCT32 texture";
     compare32(gs,expected,label.c_str());
 }
+
+void triangleDepthCase(SmokeGS& gs, bool reverse) {
+    setupDraw(gs,0,true);
+    sprite(gs,0,0,64,64,0x80605040,0);
+    reg(gs, GS_REG_PRIM,3);
+    reg(gs, GS_REG_RGBAQ,uint64(0x80402010) | (uint64(0x3f800000)<<32));
+    const uint64 vertices[]={pos(8,8)|(uint64(10000)<<32),
+        pos(24,8)|(uint64(20000)<<32),pos(8,24)|(uint64(30000)<<32)};
+    reg(gs, GS_REG_XYZ2,vertices[0]);
+    reg(gs, GS_REG_XYZ2,vertices[reverse?2:1]);
+    reg(gs, GS_REG_XYZ2,vertices[reverse?1:2]);
+    gs.Finish(true);
+    std::vector<uint32> depth(64*64);
+    transfer(gs,0x30,true,depth.data(),depth.size()*4,0x10000);
+    std::vector<uint32> color(64*64,0x80605040);
+    for(unsigned y=0;y<64;y++) for(unsigned x=0;x<64;x++) {
+        // Integer sample positions, top/left edges included, diagonal excluded.
+        const bool inside=x>=8 && y>=8 && x+y<32;
+        const uint32 expected=inside ? 10000+(x-8)*625+(y-8)*1250 : 0;
+        if(depth[y*64+x]!=expected) {
+            std::cerr << "Triangle depth mismatch reverse=" << reverse << " x=" << x
+                      << " y=" << y << " expected=" << expected << " actual=" << depth[y*64+x] << std::endl;
+            throw std::runtime_error("Triangle coverage/depth interpolation failed");
+        }
+        if(inside) color[y*64+x]=0x80402010;
+    }
+    compare32(gs,color,reverse ? "reverse triangle coverage/depth" : "triangle coverage/depth");
+}
+
 void stateCase(SmokeGS& gs) {
     gs.Finish(true);
     const auto expected=gs.snapshot();
@@ -272,6 +301,8 @@ int main(int argc, char** argv) {
         gs->checkHardware();
         for(unsigned psm : {0u, 2u}) for(bool blend : {false,true}) drawCase(*gs,psm,blend);
         for(unsigned format : {0u,1u,2u,10u}) depthCase(*gs,format);
+        triangleDepthCase(*gs,false);
+        triangleDepthCase(*gs,true);
         textureCase(*gs,false);
         textureCase(*gs,true);
         textureCase(*gs,true,1);

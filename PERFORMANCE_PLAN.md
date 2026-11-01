@@ -311,3 +311,41 @@ first sixteen entries occupy an 8-by-2 block, not a 16-by-1 row. No upstream
 renderer changes were needed. These are compatibility gates, not evidence of
 faster racing. The next integration boundary is ordered GS commands, transfers
 and presentation while retaining this runtime's statically recompiled CPU.
+
+### Private ordered-command integration experiment
+
+A separate private executable now connects the existing statically recompiled
+game/CPU objects to Play!'s GS backend through ordered registers and image
+transfers. The ordinary runtime sources and both installed play binaries remain
+unchanged. This adapter has no checkpoint support and currently presents through
+an SDL readback path; it is not installed in the public patch stack.
+
+A 600-frame boot comparison matched guest RAM and audio exactly. Captured images
+were close but not byte-identical (maximum channel difference 3/255). A longer
+3,000-frame scripted boot reached an actual race and rendered menus, scenery,
+car and HUD. However, larger image differences and guest RAM/audio divergence
+appeared. Two reference-only boot repetitions matched all captured images, RAM
+and audio exactly, and an instrumented reference repetition also matched.
+
+The first traced GPU-to-game readback divergence was at guest frame 2128: 57 of
+1,024 returned 32-bit values differed. A fix that preserves the CPU-side GS
+cache during screenshot readback and defers asynchronous readback delivery did
+not eliminate the divergence. Its cause is still unresolved; do not declare
+this adapter correct based on similar screenshots or the standalone smoke
+suite. The ordinary benchmark rejects the `[play-gs-prototype]` marker even if
+other expected baseline log lines are present. All traces and game-derived
+captures remain private.
+
+
+The public synthetic suite additionally passes triangle coverage and exact
+interpolated Z32 readback in both winding orders for an integer-sample triangle
+with an analytically calculated depth plane. This does not cover the arbitrary
+racing geometry that produces the divergent readback.
+
+A preliminary real-window screen of the private adapter's SDL readback path was
+slower: 38.6 guest vblanks/s versus 55.4 for the reference over the selected
+560 racing intervals. These were single runs from scripted boot, with real
+hardware Vulkan and audio, and unresolved guest-state differences. They are
+screening results, not a validated comparison or a speedup. An earlier attempt
+with missing audio was rejected. Direct GPU presentation needs evaluation
+before judging the integrated backend's eventual performance.
