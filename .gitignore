@@ -78,3 +78,11 @@
 !/scripts/build-native-coverage.py
 
 !/patches/native-rejection-profile.patch
+
+# ROM-free, isolated hardware GS feasibility test.
+!/scripts/build-play-gs-smoke.py
+!/tools/play-gs-smoke/
+/tools/play-gs-smoke/*
+!/tools/play-gs-smoke/CMakeLists.txt
+!/tools/play-gs-smoke/main.cpp
+!/tools/play-gs-smoke/README.md

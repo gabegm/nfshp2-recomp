@@ -4,6 +4,10 @@ import subprocess
 import sys
 
 allowed = {
+    'scripts/build-play-gs-smoke.py',
+    'tools/play-gs-smoke/CMakeLists.txt',
+    'tools/play-gs-smoke/main.cpp',
+    'tools/play-gs-smoke/README.md',
     'tools/native_target_bridge.hpp',
     'tools/native_target_bridge_test.cpp',
     'tests/test_native_target_bridge.py',

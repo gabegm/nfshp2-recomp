@@ -279,3 +279,21 @@ test; then map ordered registers/transfers, private display registers, readback,
 save-state synchronization and SDL presentation. Test on hardware and benchmark
 whole racing segments before selecting it. No backend code has been imported,
 and neither compatibility nor improved racing performance is established.
+
+
+### Standalone backend smoke test (2026-11-01)
+
+`python3 scripts/build-play-gs-smoke.py --fetch --run` builds a separate,
+ROM-free executable against pinned Play! GS sources and dependencies, without
+linking its CPU emulator. Four synthetic cases passed on the real UHD 620:
+32/16-bit framebuffer uploads, sprite rasterization and readback, each with
+destination blending off/on. Every pixel matched independently calculated
+values. A software-only Vulkan run was rejected before starting the GS worker.
+Rebuilding without network access also passed. The ordinary game builds remain
+unchanged; no racing performance improvement is claimed.
+
+The handwritten harness/build script and dependency/license notes are public;
+third-party sources, binaries and configuration remain ignored. See
+[the test instructions](tools/play-gs-smoke/README.md). Next extend coverage to
+depth, textures/palettes and state synchronization, then implement the runtime
+adapter and SDL presentation behind an explicit experimental build selection.
