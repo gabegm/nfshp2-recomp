@@ -286,6 +286,44 @@ void stateCase(SmokeGS& gs) {
     textureCase(gs,true,1,false); // draw from restored texture/palette without reuploading
 }
 
+void bilinearAlphaCase(SmokeGS& gs) {
+    constexpr unsigned base=0x20000;
+    std::vector<uint32> texture(64*64);
+    for(unsigned y=0;y<64;y++) for(unsigned x=0;x<64;x++)
+        texture[y*64+x]=0x002864c8u | (uint32(x%2?127:0)<<24);
+    transfer(gs,0,false,texture.data(),texture.size()*4,base);
+    for(bool test : {false,true}) {
+        setupDraw(gs,0,true);
+        sprite(gs,0,0,64,64,0x80605040,100);
+        reg(gs,GS_REG_TEXFLUSH,0);
+        reg(gs,GS_REG_TEX0_1,(base/256)|(uint64(1)<<14)|(uint64(6)<<26)|
+            (uint64(6)<<30)|(uint64(1)<<34)|(uint64(1)<<35));
+        reg(gs,GS_REG_TEX1_1,(1<<5)|(1<<6)); // linear min/mag
+        reg(gs,GS_REG_CLAMP_1,0);
+        reg(gs,GS_REG_TEST_1,(uint64(1)<<16)|(uint64(1)<<17)|
+            (test ? 1|(5<<1)|(64<<4) : 0)); // alpha GEQUAL64, KEEP on failure
+        reg(gs,GS_REG_PRIM,6|0x10|0x100);
+        reg(gs,GS_REG_UV,pos(0,0));
+        reg(gs,GS_REG_XYZ2,pos(8,8)|(uint64(200)<<32));
+        reg(gs,GS_REG_UV,pos(16,16));
+        reg(gs,GS_REG_XYZ2,pos(24,24)|(uint64(200)<<32));
+        gs.Finish(true);
+        std::vector<uint32> color(64*64),depth(64*64);
+        transfer(gs,0,true,color.data(),color.size()*4);
+        transfer(gs,0x30,true,depth.data(),depth.size()*4,0x10000);
+        // An exact half blend of alpha 0 and 127 truncates to 63. This is
+        // below GEQUAL64, so KEEP must retain both background and depth.
+        for(unsigned y=0;y<64;y++) for(unsigned x=0;x<64;x++) {
+            const bool written=!test && x>=8 && x<24 && y>=8 && y<24;
+            const uint32 expectedColor=written ? 0x3f2864c8u : 0x80605040u;
+            const uint32 expectedDepth=written ? 200 : 100;
+            if(color[y*64+x]!=expectedColor || depth[y*64+x]!=expectedDepth)
+                throw std::runtime_error("Bilinear alpha threshold/depth comparison failed");
+        }
+        std::cout << "PASS bilinear alpha threshold test=" << test << " (4096 colour/depth pixels)" << std::endl;
+    }
+}
+
 int main(int argc, char** argv) {
     if(argc!=2) { std::cerr << "Usage: play-gs-smoke PRIVATE_DATA_DIRECTORY\n"; return 2; }
     try {
@@ -307,6 +345,7 @@ int main(int argc, char** argv) {
         textureCase(*gs,true);
         textureCase(*gs,true,1);
         stateCase(*gs);
+        bilinearAlphaCase(*gs);
         gs->Release();
         std::cout << "PASS synthetic GS hardware smoke test\n";
         return 0;

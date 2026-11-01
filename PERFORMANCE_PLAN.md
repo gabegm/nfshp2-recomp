@@ -391,3 +391,36 @@ Next isolate the redundant frame submission at presentation, resolve the
 readback discrepancy, and implement checkpoint/shutdown/scale handling before
 making a public experimental game runner. The existing public smoke test is
 reproducible; the game adapter remains private and incomplete.
+
+
+### Follow-up private adapter experiments
+
+Skipping an extra presentation finish only when no new GS writes were pending
+preserved all images, guest RAM and audio across a 3,000-frame windowed on/off
+comparison. It skipped 624 empty finishes. However, alternating racing runs
+measured off 58.53/59.31 versus on 59.12/59.23 guest vblanks/s, with two-vblank
+p99 worsening from 46.42/45.56 ms to 65.01/63.66 ms. It was rejected.
+
+Batching register processing in chunks of 1,024, with drains before transfer,
+readback and presentation boundaries, also preserved the same full comparison.
+It reduced process calls from 123,447,844 to 399,990. Alternating runs measured
+off 58.65/58.41 versus on 58.78/58.62 guest vblanks/s; two-vblank p99 was
+47.94/47.79 ms off and 45.64/48.85 ms on. This is too small and noisy to claim a
+useful racing improvement. It does not resolve the integration's accuracy or
+checkpoint limitations. All these measurements used the temporary diagnostic
+window setup described above and are not ordinary baseline benchmarks.
+
+The first game readback is now identified precisely: Z32 at VRAM base 0x200000,
+512-pixel stride, source x=452/y=0, width=32/height=32, at guest frame 2128.
+A ROM-free hardware probe showed filtered alpha 0/127 becoming 63; GEQUAL64
+then keeps background colour/depth. The public synthetic suite now checks this
+case. The current reference shader rounds bilinear samples instead, which can
+change an alpha-test decision. But an isolated private reference variant that
+removed only that rounding still produced the same 57 depth-sample differences
+against Play!. This candidate mechanism did not explain the actual discrepancy.
+Neither renderer should be treated as a PS2 hardware accuracy oracle.
+
+Next add restricted cold checkpoint import to the diagnostic adapter so it can
+be measured from the existing early/later racing checkpoints. Preserve raw
+VRAM, latched palette data, GS registers and queued vertices; reject unsupported
+state layouts. General hot-load/save support remains a separate requirement.

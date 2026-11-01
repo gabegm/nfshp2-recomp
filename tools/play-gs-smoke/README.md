@@ -36,6 +36,13 @@ palette updates, and a reset/save/load round trip comparing all 4 MiB of VRAM
 and all GS registers. A subsequent draw samples the restored texture/palette
 without reuploading them. The CSM1 palette upload uses an 8-by-2 block.
 
+Bilinear-alpha cases also check that filtering alpha 0/127 at an exact half
+produces 63 and that GEQUAL64 with KEEP preserves both background colour and
+depth. This expectation agrees with the integer interpolation in
+[PCSX2's software renderer](https://github.com/PCSX2/pcsx2/blob/master/pcsx2/GS/Renderers/SW/GSDrawScanlineCodeGenerator.all.cpp);
+no PCSX2 code is imported. It is a focused integration check, not a PS2 hardware
+accuracy oracle.
+
 These cases passed on the UHD 620. Software-driver rejection also passed.
 This is a small correctness/feasibility test, not a performance benchmark or
 proof of complete GS compatibility. Broader interpolation cases, mixed-format
