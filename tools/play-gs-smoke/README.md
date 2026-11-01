@@ -25,14 +25,21 @@ is an error. The test uses a private configuration directory and does not read
 or change an installed Play! configuration. `--vulkan-library /absolute/path`
 can select an installed Vulkan loader if automatic discovery fails.
 
-The four initial cases upload a known 64x64 framebuffer, draw a sprite and read
+The four colour cases upload a known 64x64 framebuffer, draw a sprite and read
 it back, comparing all 4,096 pixels against independently calculated values:
 32-bit and 16-bit colour, each with blending disabled and enabled. Blending
 uses `(Cs-Cd)*As/128+Cd`. No screenshots or approximate image comparisons are
-used. These cases passed on the UHD 620. Software-driver rejection also passed.
+used. Additional cases check GREATER/GEQUAL depth comparisons in 32-bit,
+24-bit and both 16-bit layouts, direct-colour and indexed PSMT4 textures,
+palette updates, and a reset/save/load round trip comparing all 4 MiB of VRAM
+and all GS registers. A subsequent draw samples the restored texture/palette
+without reuploading them. The CSM1 palette upload uses an 8-by-2 block.
+
+These cases passed on the UHD 620. Software-driver rejection also passed.
 This is a small correctness/feasibility test, not a performance benchmark or
-proof of complete GS compatibility. Depth, textures, palette coherency, state
-restoration and presentation need separate validation before game integration.
+proof of complete GS compatibility. Triangle interpolation, mixed-format
+aliasing, more complex alpha effects, display/presentation and the runtime
+adapter still need validation before game integration.
 
 The executable links upstream GS handling, Vulkan rendering and utility code.
 It does not build or link Play!'s CPU emulator or CodeGen library. CodeGen

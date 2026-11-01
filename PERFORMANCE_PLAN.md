@@ -297,3 +297,17 @@ third-party sources, binaries and configuration remain ignored. See
 [the test instructions](tools/play-gs-smoke/README.md). Next extend coverage to
 depth, textures/palettes and state synchronization, then implement the runtime
 adapter and SDL presentation behind an explicit experimental build selection.
+
+
+### Extended backend smoke checks
+
+The isolated hardware suite now also passes reversed GS depth comparisons
+(GREATER, equal rejection, GEQUAL equality acceptance) for Z32, Z24, Z16 and
+Z16S; a direct-colour texture; indexed PSMT4 textures with palette changes;
+and reset/save/load with byte-exact comparison of all 4 MiB of VRAM and all GS
+registers. Sampling the restored texture/palette without reuploading it passes.
+The initial indexed mismatch was corrected in the synthetic fixture: CSM1's
+first sixteen entries occupy an 8-by-2 block, not a 16-by-1 row. No upstream
+renderer changes were needed. These are compatibility gates, not evidence of
+faster racing. The next integration boundary is ordered GS commands, transfers
+and presentation while retaining this runtime's statically recompiled CPU.
