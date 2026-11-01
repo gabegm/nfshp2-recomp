@@ -424,3 +424,51 @@ Next add restricted cold checkpoint import to the diagnostic adapter so it can
 be measured from the existing early/later racing checkpoints. Preserve raw
 VRAM, latched palette data, GS registers and queued vertices; reject unsupported
 state layouts. General hot-load/save support remains a separate requirement.
+
+
+### Canonical checkpoint comparison: Play! is not the racing fix
+
+The private adapter now supports a restricted, one-time cold import at 1x.
+It restores all 4 MiB of VRAM, the saved latched palette, both GS contexts and
+queued primitive vertices. GPU readback verified the complete VRAM and palette
+contents after import. Menu, early-race and later-race checkpoints each resumed
+for four ticks. Menu pixels differed by at most four channel levels; racing
+images showed larger differences, so this is not an accuracy certification.
+Hot loading, general saving and unsupported state layouts remain rejected.
+
+A stronger comparison now starts both renderers from the canonical early-race
+checkpoint at guest frame 3000, with identical held input, real audio and
+measurement over frames 3040–3599. Runs alternate reference/prototype/prototype/
+reference; both use the temporary unmanaged X11 diagnostic setting described
+above. No builds or captures run during measurement.
+
+| Run | Guest vblanks/s | Adjacent two-vblank p99 (ms) |
+|---|---:|---:|
+| Reference A | 52.31 | 92.74 |
+| Play! direct Vulkan A | 50.86 | 54.71 |
+| Play! direct Vulkan B | 50.01 | 51.41 |
+| Reference B | 52.82 | 94.76 |
+
+Play! improves the pacing tail in this sample but averages about 4% slower.
+The earlier lighter boot-driven scene's speedup does not carry over to the
+heavy race. Neither renderer sustains full guest speed here. Reference audio
+starvation occurred only at startup frame 3003, outside the measured interval;
+none occurred in the prototype. Rendering/readback differences remain unresolved.
+These are diagnostic results, not accepted baseline benchmarks. The normal
+renderer and executable remain unchanged; this adapter is not a default upgrade.
+
+A separate private build selected Play!'s mobile render-target implementation.
+The ROM-free smoke test immediately failed depth ordering: a farther Z=150
+sprite overwrote Z=200 under GREATER testing. That path was rejected before
+any game performance measurement. Its failure does not establish a precise
+hardware or driver cause.
+
+The next investigation is a GS-only PCSX2 renderer boundary, retaining the
+statically recompiled game CPU. The existing GE1 adapter in
+[PS2Recomp](https://github.com/brad-richardson/PS2Recomp/tree/666ad40799f69da083d91594f759463e51f4ecce/ps2xRuntime/third_party/armsx2)
+provides a useful interface example, but its build links the PCSX2 core target
+and relies on a modified ARM-oriented fork and platform-specific features.
+It is not a ready Linux/x86 renderer plugin. Investigation stays in ignored
+private sources; its GPL notices and component licences must be respected
+before publishing any integration. No game assets, generated game code,
+checkpoint data or third-party shader-cache blobs belong in the public setup.
