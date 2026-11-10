@@ -503,3 +503,46 @@ updates and depth ordering but differs on 16-bit blending, triangle depth and
 filtered alpha. It is not certified as an accurate game backend. Both private
 renderer markers are explicitly rejected by the ordinary baseline benchmark.
 No game runner or public dependency pin changed during this upstream review.
+
+
+### Isolated upstream VU optimization test, 2026-11-10
+
+Tested the generator and `vu_ops.hpp` portions of upstream
+`c9a9caa5eafe2d07bbdebb916e71b02943dbe3ba` on our existing patched base.
+Regenerated all 75 recorded native VU programs (28 jump targets), rebuilt their
+five translation units and registration table, and substituted those objects
+in a private copy of the game archive. The registration table remained exact.
+The original EE objects, runtime, renderer, host objects and normal executable
+were reused unchanged. This tests the static VU optimization, not a full
+upstream runtime update or new live-code generator integration.
+
+Correctness: menu, early racing and later racing each resumed for 120 ticks.
+All 15 compared artifacts (three images, guest RAM and audio per scene) were
+byte-identical to reference. Sampled compiled/interpreter checks reported no
+mismatches. This is targeted regression evidence, not full-game certification.
+
+Performance: each race used its canonical checkpoint, held accelerator input,
+600 guest ticks with 40 warmup ticks, real hardware Vulkan and real audio.
+Reference/candidate/candidate/reference order was used in each scene, with no
+captures, interpreter checking or builds during measurements. Both used the
+temporary unmanaged X11 diagnostic window setting to avoid the documented
+MapNotify stall. All eight runs completed with zero interpreted VU calls and
+no logged audio-starvation events after warmup.
+
+**These measurements were on battery**, AC offline and balanced power
+preference throughout. They are paired diagnostic results; do not compare their
+absolute rates with the earlier AC-powered results or treat them as an AC
+performance estimate.
+
+| Scene | Reference A / B (guest vblanks/s) | Candidate A / B | Change in mean rate |
+|---|---:|---:|---:|
+| Heavy early race | 39.36 / 40.63 | 40.45 / 40.56 | +1.28% |
+| Later race | 51.70 / 50.30 | 50.41 / 50.20 | -1.36% |
+
+The first reference/candidate pair suggested a small improvement, but it did
+not repeat against the final reference. The later scene showed the opposite
+mean change. There is no consistent end-to-end racing win in this test, and
+neither scene reached full speed. The normal build remains unchanged. The
+candidate and all game-derived recordings/captures stay under ignored `.local/`
+storage. An AC-powered repeat can tighten this estimate, but the upstream VU
+speed claim alone does not justify claiming or shipping a racing speedup.
