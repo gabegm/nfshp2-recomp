@@ -472,3 +472,34 @@ It is not a ready Linux/x86 renderer plugin. Investigation stays in ignored
 private sources; its GPL notices and component licences must be respected
 before publishing any integration. No game assets, generated game code,
 checkpoint data or third-party shader-cache blobs belong in the public setup.
+
+
+### Upstream review, 2026-11-10
+
+Fetched `exoteric33/ps2-native-recomp` without changing the patched checkout.
+Our pin is `ba3d471`; inspected upstream main is
+`e543849` (153 intervening commits). There is no measured NFS HP2 speedup from
+this review; updating the full runtime requires an isolated build and regression
+comparison because graphics, state loading, VU generation and host interfaces
+have all changed.
+
+- `c9a9caa` (October 30) reports compiled VU programs 10–17% cheaper, using
+  SSE4.1 integer clamping and omitting provably redundant constant-register
+  clamps. This CPU supports SSE4.1. Testing it requires rebuilding affected
+  generated/native VU code; this is not a claim of 10–17% higher game speed.
+- `ea32986` (November 9) adds an MIT native hardware drawing path, disabled by
+  default behind `PS2_GPU_HW=1`. Its own `hwdraw.cpp` notes report slower
+  end-to-end performance on an Intel laptop and out-of-memory failures in one
+  scene. Conservative defaults route few shapes; wider routing increases
+  overhead. It is useful renderer research, not a proven older-GPU speed fix.
+- `0a7e1b4` and `6ed01c5` fix stale GPU downloads and depth-buffer round trips.
+  These matter to correctness and invalidate assumptions that all former cached
+  readbacks are acceptable. They must be included in a full-runtime comparison.
+
+The private upstream-PCSX2 GS feasibility build also opens Vulkan on UHD620.
+Synthetic software-GS controls pass all tested colour, depth, texture, palette,
+triangle and bilinear-alpha cases. Its hardware GS passes transfers, palette
+updates and depth ordering but differs on 16-bit blending, triangle depth and
+filtered alpha. It is not certified as an accurate game backend. Both private
+renderer markers are explicitly rejected by the ordinary baseline benchmark.
+No game runner or public dependency pin changed during this upstream review.
