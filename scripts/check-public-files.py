@@ -41,6 +41,7 @@ allowed = {
     'tests/test_runtime_patches.py',
     'tests/test_upload_cache.py',
     'scripts/fetch-widescreen.py',
+    'scripts/multilanguage.py',
     'OPTIMIZATION.md',
     'NATIVE_RENDERER.md',
     'scripts/analyze-vu-census.py',
@@ -60,6 +61,7 @@ allowed = {
     'scripts/compare-native-frame.py',
     'patches/vu-census.patch',
     'tests/test_widescreen.py',
+    'tests/test_multilanguage.py',
     'scripts/nointro.py',
     'tests/test_nointro.py',
 }

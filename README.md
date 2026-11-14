@@ -13,6 +13,18 @@ Linux prerequisites: Git, Python 3, CMake, Ninja, a C++20 compiler with
 `<format>` support, SDL2 development files, curl, unzip and a Vulkan driver.
 On Fedora, the SDL2 development package is `SDL2-devel`.
 
+Clang alone does not supply C++ standard library headers. On Fedora, if the
+build reports `no C++ compiler here has <format>` (as in [issue #2](https://github.com/gabegm/nfshp2-recomp/issues/2)),
+install `gcc-c++` and retry; the upstream setup probes `g++` automatically:
+
+```sh
+sudo dnf install gcc-c++ SDL2-devel
+```
+
+To use Clang with libc++ instead, install `libcxx-devel` and
+`libcxxabi-devel`, then set `CXX=clang++`. A Clang version number alone does not
+show which C++ standard library headers and libraries are installed.
+
 Supply your own lawfully obtained PS2 disc image:
 
 ```sh
@@ -72,6 +84,7 @@ Only the widescreen and HUD sections are enabled. The 60-fps hack and controller
 changes in the downloaded file are left disabled.
 
 The normal 4:3 build stays available with `bash scripts/play.sh --performance`.
+
 Both profiles use the same in-game memory card path, while widescreen quick
 saves are stored separately. Start widescreen from a cold boot or a widescreen
 quick save; a 4:3 quick save contains previously initialized projection state.
@@ -82,6 +95,23 @@ Widescreen increases the visible area; it is a visual feature, not a speed fix.
 Cold boot, menus and an early race are the initial validation scope. Other
 tracks, movies and a full playthrough remain unverified. Downloaded community
 patches, patched game files and generated binaries stay in `.local/`.
+
+## US disc language selection
+
+Build an optional profile that enables the language menu using the two
+instructions shared by Felixthecat1970 in [issue #1](https://github.com/gabegm/nfshp2-recomp/issues/1):
+
+```sh
+bash scripts/build.sh "/absolute/path/to/game.iso" --multilanguage --no-explore
+bash scripts/play.sh --multilanguage --performance
+```
+
+The build checks the US disc serial, executable SHA-256 and original
+instructions before applying the patch and translating the game. The ISO and
+unpatched 4:3 build stay intact. To combine the language menu with widescreen,
+build and launch with both `--widescreen` and `--multilanguage`. Each profile
+has separate quick saves; they share the in-game memory card. The language
+menu patch has not yet been checked across a full playthrough.
 
 ## Performance
 

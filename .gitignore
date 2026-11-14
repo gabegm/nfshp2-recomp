@@ -12,6 +12,7 @@
 !/scripts/check-public-files.py
 !/scripts/play.sh
 !/scripts/fetch-widescreen.py
+!/scripts/multilanguage.py
 !/scripts/nointro.py
 !/scripts/apply-runtime-patches.py
 !/scripts/analyze-vu-census.py
@@ -26,6 +27,7 @@
 !/tests/
 /tests/*
 !/tests/test_widescreen.py
+!/tests/test_multilanguage.py
 !/tests/test_nointro.py
 !/tests/test_runtime_patches.py
 !/tests/test_upload_cache.py

@@ -94,7 +94,7 @@ class LauncherTests(unittest.TestCase):
             '(root/"nointro-source.txt").write_text(sys.argv[1])\n'
             'print(root/".local/intro-patch.txt")\n')
         upstream = self.root / '.local/ps2-native-recomp'
-        for game in ('nfshp2', 'nfshp2-wide'):
+        for game in ('nfshp2', 'nfshp2-wide', 'nfshp2-lang', 'nfshp2-wide-lang'):
             disc = upstream / 'games' / game / 'disc'
             disc.mkdir(parents=True)
             (disc / 'SYSTEM.CNF').write_text('BOOT2 = cdrom0:\\BOOT.ELF;1\n')
@@ -104,7 +104,8 @@ class LauncherTests(unittest.TestCase):
                               'print(json.dumps({"args":sys.argv,"look":os.getenv("PS2_LOOK"),'
                               '"keys":os.getenv("PS2_KEYS"),"clut_reuse":os.getenv("PS2_CLUT_REUSE")}))\n')
             runner.chmod(0o755)
-        (upstream / 'games/nfshp2-wide/patches.txt').write_text('')
+        for game in ('nfshp2-wide', 'nfshp2-lang', 'nfshp2-wide-lang'):
+            (upstream / 'games' / game / 'patches.txt').write_text('')
         self.environment = {k: v for k, v in os.environ.items() if not k.startswith('PS2_')}
 
     def launch(self, *args):
@@ -148,11 +149,25 @@ class LauncherTests(unittest.TestCase):
         (self.root / '.local/ps2-native-recomp/build/native-nfshp2-wide/ps2run').unlink()
         result = self.launch('--widescreen')
         self.assertEqual(result.returncode, 1)
-        self.assertIn('Build widescreen first', result.stderr)
+        self.assertIn('Build this profile first', result.stderr)
+
+    def test_multilanguage_selects_patched_executable_and_own_quick_saves(self):
+        for flags, game in [(('--multilanguage',), 'nfshp2-lang'),
+                            (('--widescreen', '--multilanguage'), 'nfshp2-wide-lang')]:
+            with self.subTest(flags=flags):
+                result = self.launch(*flags, '--frames', '1')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                args = json.loads(result.stdout)['args']
+                self.assertEqual(args[1], f'games/{game}/patched/BOOT.ELF')
+                self.assertEqual(args[args.index('--patches') + 1], f'games/{game}/patches.txt')
+                self.assertEqual(args[args.index('--quick-dir') + 1], f'games/{game}')
+                self.assertEqual(args.count('--widescreen'), int('wide' in game))
 
     def test_nointro_combines_with_each_profile_without_controller_presses(self):
         for flags, game in [(('--nointro', '--performance'), 'nfshp2'),
-                            (('--performance', '--widescreen', '--nointro'), 'nfshp2-wide')]:
+                            (('--performance', '--widescreen', '--nointro'), 'nfshp2-wide'),
+                            (('--multilanguage', '--nointro'), 'nfshp2-lang'),
+                            (('--widescreen', '--multilanguage', '--nointro'), 'nfshp2-wide-lang')]:
             with self.subTest(flags=flags):
                 result = self.launch(*flags)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -162,8 +177,8 @@ class LauncherTests(unittest.TestCase):
                 self.assertIn(str(self.root / '.local/intro-patch.txt'), args)
                 self.assertEqual((self.root / 'nointro-source.txt').read_text(),
                                  f'games/{game}/disc/BOOT.ELF')
-                if game.endswith('-wide'):
-                    self.assertIn('games/nfshp2-wide/patches.txt', args)
+                if game != 'nfshp2':
+                    self.assertIn(f'games/{game}/patches.txt', args)
 
     def test_nointro_leaves_state_and_replay_resumes_alone(self):
         for option in ('--load-state', '--replay'):

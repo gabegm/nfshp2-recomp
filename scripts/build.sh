@@ -15,15 +15,19 @@ esac
 shift
 game=nfshp2
 wide=0
+multilanguage=0
 port_args=()
 for arg in "$@"; do
   if [ "$arg" = "--widescreen" ]; then
     wide=1
-    game=nfshp2-wide
+  elif [ "$arg" = "--multilanguage" ]; then
+    multilanguage=1
   else
     port_args+=("$arg")
   fi
 done
+if [ "$wide" = 1 ]; then game+=-wide; fi
+if [ "$multilanguage" = 1 ]; then game+=-lang; fi
 if [ -d "$root/.local/deps" ]; then
   export CMAKE_PREFIX_PATH="$root/.local/deps${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
   export PKG_CONFIG_PATH="$root/.local/deps/lib64/pkgconfig:$root/.local/deps/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
@@ -44,6 +48,12 @@ if [ ! -d "$upstream/.git" ]; then
 fi
 if [ "$(git -C "$upstream" rev-parse HEAD)" != "$revision" ]; then
   echo "Expected upstream revision $revision; inspect the local checkout before proceeding." >&2
+  exit 1
+fi
+if ! (cd "$upstream" && ROOT="$upstream" cxx_tools=1 bash -c '. scripts/cxx.sh' > /dev/null); then
+  if command -v dnf > /dev/null; then
+    echo 'Fedora: install gcc-c++ (or libcxx-devel and libcxxabi-devel for Clang), then retry.' >&2
+  fi
   exit 1
 fi
 python3 "$root/scripts/apply-runtime-patches.py" "$upstream" \
@@ -83,6 +93,10 @@ if [ "$wide" = 1 ]; then
     [ -e "$upstream/games/$game/vu1/$(basename "$program")" ] || cp "$program" "$upstream/games/$game/vu1/"
   done
 fi
+if [ "$multilanguage" = 1 ]; then
+  language_patch=$(python3 "$root/scripts/multilanguage.py" "$image")
+  port_args+=(--pnach "$language_patch" --pnach-section 'Unlock multilanguage for USA')
+fi
 # Upstream reuses a game's previous image. Refuse an accidental disc switch.
 if [ -e "$upstream/games/$game/disc.iso" ] && ! [ "$image" -ef "$upstream/games/$game/disc.iso" ]; then
   echo 'A different image is already configured; use a separate checkout for another disc.' >&2
@@ -94,6 +108,9 @@ export PS2_JOBS="${PS2_JOBS:-4}"
 export CCACHE_DIR="$root/.local/ccache"
 bash scripts/setup.sh --native-only
 bash scripts/port.sh "$game" "$image" --native-only "${port_args[@]}"
-if [ "$wide" = 1 ]; then
-  echo "From the setup directory, play with: bash scripts/play.sh --widescreen --performance"
+if [ "$wide" = 1 ] || [ "$multilanguage" = 1 ]; then
+  launch=(bash scripts/play.sh)
+  if [ "$wide" = 1 ]; then launch+=(--widescreen); fi
+  if [ "$multilanguage" = 1 ]; then launch+=(--multilanguage); fi
+  echo "From the setup directory, play with: ${launch[*]} --performance"
 fi
