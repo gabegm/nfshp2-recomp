@@ -101,8 +101,8 @@ class LauncherTests(unittest.TestCase):
             runner = upstream / 'build' / ('native-' + game) / 'ps2run'
             runner.parent.mkdir(parents=True)
             runner.write_text('#!/usr/bin/env python3\nimport json,os,sys\n'
-                              'print(json.dumps({"args":sys.argv,"look":os.getenv("PS2_LOOK"),'
-                              '"keys":os.getenv("PS2_KEYS"),"clut_reuse":os.getenv("PS2_CLUT_REUSE")}))\n')
+                              'print(json.dumps({"args":sys.argv,"tile":os.getenv("PS2_TILE"),'
+                              '"keys":os.getenv("PS2_KEYS"),"decode":os.getenv("PS2_DECODE")}))\n')
             runner.chmod(0o755)
         for game in ('nfshp2-wide', 'nfshp2-lang', 'nfshp2-wide-lang'):
             (upstream / 'games' / game / 'patches.txt').write_text('')
@@ -118,19 +118,19 @@ class LauncherTests(unittest.TestCase):
         run = json.loads(result.stdout)
         self.assertEqual(run['args'][1], 'games/nfshp2/disc/BOOT.ELF')
         self.assertNotIn('--widescreen', run['args'])
-        self.assertEqual(run['look'], 'crisp')
-        self.assertEqual(run['clut_reuse'], '1')
+        self.assertEqual(run['tile'], '4')
+        self.assertEqual(run['decode'], '0')
 
-    def test_palette_reuse_respects_explicit_disable(self):
-        self.environment['PS2_CLUT_REUSE'] = '0'
+    def test_tile_size_respects_explicit_override(self):
+        self.environment['PS2_TILE'] = '8'
         result = self.launch('--performance', '--frames', '1')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)['clut_reuse'], '0')
+        self.assertEqual(json.loads(result.stdout)['tile'], '8')
 
-    def test_normal_launcher_leaves_palette_reuse_unset(self):
+    def test_normal_launcher_leaves_tile_size_unset(self):
         result = self.launch('--frames', '1')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIsNone(json.loads(result.stdout)['clut_reuse'])
+        self.assertIsNone(json.loads(result.stdout)['tile'])
 
     def test_widescreen_uses_matching_program_and_runtime_patches_in_either_flag_order(self):
         for flags in [('--performance', '--widescreen'), ('--widescreen', '--performance'),

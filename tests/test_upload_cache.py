@@ -1,4 +1,4 @@
-"""Exercise the installed runtime cache with synthetic buffers; no game is needed."""
+"""Exercise the historical renderer patch in a retained old checkout."""
 from pathlib import Path
 import shutil
 import subprocess
@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME = ROOT / '.local/ps2-native-recomp/runtime/src/gs/gpu/gpu.cpp'
+RUNTIME = ROOT / '.local/ps2-native-recomp-ba3d471/runtime/src/gs/gpu/gpu.cpp'
 HARNESS = r"""#include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -79,7 +79,7 @@ int main() {
 """
 
 class UploadCacheTests(unittest.TestCase):
-    @unittest.skipUnless(RUNTIME.is_file(), 'Build the private runtime first; no ROM is needed by this test.')
+    @unittest.skipUnless(RUNTIME.is_file(), 'The old patched checkout is needed for this historical test.')
     def test_append_collisions_wrap_and_pending_gpu_reads(self):
         compiler = shutil.which('c++') or shutil.which('clang++')
         if not compiler:

@@ -21,22 +21,12 @@ for arg in "${runner_args[@]}"; do
   case "$arg" in --load-state|--replay) resume=1 ;; esac
 done
 if [ "$performance" = 1 ]; then
-  # On the tested Intel laptop, queue overhead outweighs the extra VU thread,
-  # and sampling textures directly is cheaper than the predecode pass.
-  export PS2_NO_VU_THREAD=1
+  # These settings are supported by the current upstream renderer.
   export PS2_DECODE="${PS2_DECODE:-0}"
   export PS2_SCALE="${PS2_SCALE:-1}"
-  # Smaller raster tiles reduced GPU time in the measured UHD 620 race.
   export PS2_TILE="${PS2_TILE:-4}"
-  # Specialize uniform raster batches; unsupported states use the generic path.
-  export PS2_RASTER_SPECIALIZE="${PS2_RASTER_SPECIALIZE:-1}"
-  export PS2_RACE_SPECIALIZE="${PS2_RACE_SPECIALIZE:-1}"
-  # Reuse consecutive identical palette loads until VRAM can change.
-  export PS2_CLUT_REUSE="${PS2_CLUT_REUSE:-1}"
-  # The default cubic sharpening filter costs substantial time on the UHD 620.
-  export PS2_LOOK="${PS2_LOOK:-crisp}"
 fi
-cd "$root/.local/ps2-native-recomp"
+cd "${NFSHP2_UPSTREAM:-$root/.local/ps2-native-recomp}"
 export LD_LIBRARY_PATH="$root/.local/deps/lib64:$root/.local/deps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 game=nfshp2
 extra=()

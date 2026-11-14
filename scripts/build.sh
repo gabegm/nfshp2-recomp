@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-revision=ba3d4712a9291abe1767c8aa0aa8dc4eeda1db71
-upstream="$root/.local/ps2-native-recomp"
+revision=5d1ebbcf133cb3c31df75a294dbe38e30734c1ce
+upstream="${NFSHP2_UPSTREAM:-$root/.local/ps2-native-recomp}"
 if [ $# -lt 1 ] || [ ! -f "$1" ]; then
   echo 'Usage: bash scripts/build.sh "/absolute/path/to/your/disc.iso" [port.sh options]' >&2
   exit 2
@@ -46,43 +46,20 @@ if [ ! -d "$upstream/.git" ]; then
   git clone https://github.com/exoteric33/ps2-native-recomp.git "$upstream"
   git -C "$upstream" checkout --detach "$revision"
 fi
+# Resolve an installation symlink so CMake keeps using its original build path.
+upstream="$(cd "$upstream" && pwd -P)"
 if [ "$(git -C "$upstream" rev-parse HEAD)" != "$revision" ]; then
   echo "Expected upstream revision $revision; inspect the local checkout before proceeding." >&2
   exit 1
 fi
 if ! (cd "$upstream" && ROOT="$upstream" cxx_tools=1 bash -c '. scripts/cxx.sh' > /dev/null); then
   if command -v dnf > /dev/null; then
-    echo 'Fedora: install gcc-c++ (or libcxx-devel and libcxxabi-devel for Clang), then retry.' >&2
+    echo 'Fedora: install clang and a C++20 standard library with <format>, then retry.' >&2
   fi
   exit 1
 fi
 python3 "$root/scripts/apply-runtime-patches.py" "$upstream" \
-  "$root/patches/runtime-compatibility.patch" \
-  "$root/patches/presentation-performance.patch" \
-  "$root/patches/graphics-profiling.patch" \
-  "$root/patches/raster-specialization.patch" \
-  "$root/patches/racing-performance.patch" \
-  "$root/patches/psmt4-sampling.patch" \
-  "$root/patches/render-cpu-profile.patch" \
-  "$root/patches/palette-reuse.patch" \
-  "$root/patches/upload-cache-eviction.patch" \
-  "$root/patches/vu-census.patch" \
-  "$root/patches/native-draw-capture.patch" \
-  "$root/patches/native-frame-proof.patch" \
-  "$root/patches/native-target-bridge.patch" \
-  "$root/patches/native-triangle.patch" \
-  "$root/patches/native-batch.patch" \
-  "$root/patches/native-coverage.patch" \
-  "$root/patches/native-rejection-profile.patch"
-# Install the hand-written shared bridge without rebuilding on unchanged copies.
-bridge_header="$upstream/runtime/src/gs/gpu/native_target_bridge.hpp"
-if ! cmp -s "$root/tools/native_target_bridge.hpp" "$bridge_header"; then
-  cp "$root/tools/native_target_bridge.hpp" "$bridge_header"
-fi
-triangle_header="$upstream/runtime/src/gs/gpu/native_triangle.hpp"
-if ! cmp -s "$root/tools/native_triangle.hpp" "$triangle_header"; then
-  cp "$root/tools/native_triangle.hpp" "$triangle_header"
-fi
+  "$root/patches/runtime-compatibility.patch"
 if [ "$wide" = 1 ]; then
   wide_patch=$(python3 "$root/scripts/fetch-widescreen.py" "$image")
   port_args+=(--widescreen --pnach "$wide_patch" --pnach-section 'Widescreen 16:9' --pnach-section 'HUD fixed for widescreen')
