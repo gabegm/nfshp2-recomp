@@ -1,0 +1,134 @@
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -28,6 +28,7 @@
+     int sharp_now = 1, sharp_next = 1;  // the 2D art filter (0 soft, 1 sharp, 2 sharpest): this run's, and keys.ini's for the next start
+     bool sharp_locked = false;  // PS2_SHARP_2D is set
+     bool fullscreen = false;
++    bool controller_disconnected = false;
+     // the keys page: one row per button (label and its keys, in the order of keys.ini) and a message line (what the last change did)
+     struct KeyRow {
+         std::string label, keys;
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -333,8 +333,9 @@
+         return;
+     }
+     static const std::string kTitleText = "Quick menu - the game waits", kHint = "Enter / Cross: OK     F1 / Esc / Circle: back";
++    const std::string title = values.controller_disconnected ? "Controller disconnected - game paused" : kTitleText;
+     std::string lines[kEntries];
+-    std::size_t chars = std::max(kTitleText.size(), kHint.size());
++    std::size_t chars = std::max(title.size(), kHint.size());
+     for (int i = 0; i < kEntries; ++i) {
+         lines[i] = entry_text(i, values, quit_armed_);
+         chars = std::max(chars, lines[i].size() + 5);  // room for the dim key at the right end
+@@ -356,7 +357,7 @@
+     c.fill(0, 0, frame, out.height, kFrame);
+     c.fill(out.width - frame, 0, frame, out.height, kFrame);
+     int y = pad * s;
+-    c.text((pad + bar_pad) * s, y, s, kTitleText, kTitle);
++    c.text((pad + bar_pad) * s, y, s, title, kTitle);
+     y += 8 * s + 6 * s;
+     c.fill(pad * s, y, out.width - 2 * pad * s, std::max(1, s / 2), kFrame);
+     y += 6 * s;
+diff --git a/host/window.cpp b/host/window.cpp
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -89,6 +89,8 @@
+ ps2sound::SoundPipe *g_pipe = nullptr;  // the game's sound: pushed by the emulation thread, played (and stretched) by the device thread, host/stretch.hpp
+ // the keyboard drives the first controller port along with the first game controller, a second one is player 2
+ SDL_GameController *g_pads[2] = {};
++bool g_pad_used[2] = {};
++bool g_disconnect_pause = false;
+ // PS2_PAD_LOG=1 prints every change of what the two controller ports send to the game, and every rumble request
+ bool g_pad_log = false;
+ std::uint32_t g_tex_w = 0, g_tex_h = 0;
+@@ -288,20 +290,31 @@
+     for (int port = 0; port < 2; ++port)
+         if (!g_pads[port]) {
+             g_pads[port] = SDL_GameControllerOpen(device);
+-            if (g_pads[port]) std::fprintf(stderr, "[pad] %s (%s) in port %d\n", or_unknown(SDL_GameControllerName(g_pads[port])), pad_kind(g_pads[port]), port + 1);
++            if (g_pads[port]) {
++                g_pad_used[port] = false;
++                std::fprintf(stderr, "[pad] %s (%s) in port %d\n", or_unknown(SDL_GameControllerName(g_pads[port])), pad_kind(g_pads[port]), port + 1);
++            }
+             else std::fprintf(stderr, "[pad] cannot open controller %d: %s\n", device, SDL_GetError());
+             return;
+         }
+     std::fprintf(stderr, "[pad] %s is not used: both ports have a controller\n", or_unknown(SDL_GameControllerNameForIndex(device)));
+ }
++
++void open_menu(const char *why);
+ 
+ void close_pad(SDL_JoystickID id) {
+     for (int port = 0; port < 2; ++port) {
+         SDL_GameController *&pad = g_pads[port];
+         if (!pad || SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad)) != id) continue;
++        const bool was_used = g_pad_used[port];
+         std::fprintf(stderr, "[pad] %s unplugged from port %d\n", or_unknown(SDL_GameControllerName(pad)), port + 1);
+         SDL_GameControllerClose(pad);
+         pad = nullptr;
++        g_pad_used[port] = false;
++        if (was_used) {
++            g_disconnect_pause = true;
++            open_menu("an active controller disconnected");
++        }
+     }
+ }
+ 
+@@ -774,13 +787,17 @@
+     if (port == 0 && (!pad || keyboard_with_pad)) read_keyboard(pressed, lx, ly, rx, ry);
+     if (pad) {
+         for (const PadBinding &b : kPadButtons)
+-            if (b.button != SDL_CONTROLLER_BUTTON_BACK && SDL_GameControllerGetButton(pad, b.button)) pressed |= b.mask;
++            if (b.button != SDL_CONTROLLER_BUTTON_BACK && SDL_GameControllerGetButton(pad, b.button)) {
++                pressed |= b.mask;
++                g_pad_used[port] = true;
++            }
+         // Select, then Start opens the quick menu, and the game must get neither. So the game gets this Select late: once it has been
+         // held for 300 ms without Start, or as a short press when it is let go without Start. (Start first and then Select would
+         // already have reached the game: the way is Select first.) A Select of the keyboard (Tab) is not held back.
+         static Uint32 select_since[2] = {}, select_tap_until[2] = {};
+         static bool select_combo[2] = {};
+         const bool sel = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_BACK), st = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_START);
++        if (sel || st) g_pad_used[port] = true;
+         const Uint32 now = SDL_GetTicks();
+         bool select_to_game = false;
+         if (sel) {
+@@ -798,6 +815,7 @@
+             const int v = SDL_GameControllerGetAxis(pad, a);
+             if (v <= 2000 || (pressed & bit)) return;
+             pressed |= bit;
++            g_pad_used[port] = true;
+             pressure = static_cast<std::uint8_t>(std::max(1, v * 255 / 32767));
+         };
+         trigger(SDL_CONTROLLER_AXIS_TRIGGERLEFT, kL2, l2);
+@@ -806,6 +824,11 @@
+         if (ly == 0x80) ly = axis(pad, SDL_CONTROLLER_AXIS_LEFTY);
+         if (rx == 0x80) rx = axis(pad, SDL_CONTROLLER_AXIS_RIGHTX);
+         if (ry == 0x80) ry = axis(pad, SDL_CONTROLLER_AXIS_RIGHTY);
++        if (std::abs(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX)) > 8000 ||
++            std::abs(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY)) > 8000 ||
++            std::abs(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTX)) > 8000 ||
++            std::abs(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTY)) > 8000)
++            g_pad_used[port] = true;
+     }
+     if (g_menu.is_open()) g_block_input[port] = true;
+     if (g_block_input[port]) {
+@@ -911,6 +934,7 @@
+         v.sharp_next = g_sharp_next;
+         v.sharp_locked = g_sharp_locked;
+         v.fullscreen = SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN;
++        v.controller_disconnected = g_disconnect_pause;
+         if (g_menu.on_keys_page()) {
+             for (int a = 0; a < keymap::kChangeableCount; ++a) v.key_rows.push_back({keymap::action_label(a), keymap::keys_text(g_keys, a)});
+             v.key_note = g_key_note;
+@@ -988,6 +1012,7 @@
+ void close_menu(const char *why) {
+     if (!g_menu.is_open()) return;
+     g_menu.close();
++    g_disconnect_pause = false;
+     g_block_input[0] = g_block_input[1] = true;
+     menu_paint();  // takes the panel away (shown at once, before the game's next picture)
+     SDL_ShowCursor(SDL_DISABLE);

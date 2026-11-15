@@ -1,0 +1,50 @@
+diff --git a/runtime/include/ps2/system.hpp b/runtime/include/ps2/system.hpp
+--- a/runtime/include/ps2/system.hpp
++++ b/runtime/include/ps2/system.hpp
+@@ -58,6 +58,7 @@
+     std::vector<AxisPress> axis_presses;
+     std::vector<Patch> patches;
+     std::function<void()> on_vblank;
++    std::function<void()> on_state_loaded;
+     // Called about every 20 ms by the game's own thread while it waits for something long (a live translation, ee_live.cpp). Set by a window run
+     // that has the game on the window thread (--frames-dir, PS2_ONE_THREAD): that thread must go on taking window messages, or Windows marks the
+     // window "not responding" after 5 s and ends the program when the player closes it (no crash line: nothing crashed). Empty when the window has a thread of its own.
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -585,6 +585,7 @@
+         state::Reader r(data, size);
+         machine_state(r);
+         g_resumed = true;
++        if (g_options.on_state_loaded) g_options.on_state_loaded();
+         std::fprintf(stderr, "[state] loaded frame %llu\n", static_cast<unsigned long long>(g_frames));
+         return true;
+     } catch (const std::exception &e) {
+diff --git a/host/main.cpp b/host/main.cpp
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -778,7 +778,10 @@
+     if (window && ps2::os::env("PS2_WINDOW_TITLE").empty())
+         if (const std::string serial = disc_serial(program_location); !serial.empty()) ps2::os::set_env("PS2_WINDOW_TITLE", serial);
+ #ifdef NFSHP2_RETROACHIEVEMENTS
+-    if (window) nfshp2::achievements::start(ps2::g_options.disc_path);
++    if (window) {
++        nfshp2::achievements::start(ps2::g_options.disc_path);
++        ps2::g_options.on_state_loaded = nfshp2::achievements::state_loaded;
++    }
+ #endif
+     if (window && !open_window(fullscreen)) return 1;
+     if (window) ps2::crash::enter_thread(ps2::crash::Thread::Gpu);  // this thread shows the pictures from now on
+diff --git a/host/window.cpp b/host/window.cpp
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -2127,6 +2127,9 @@
+         // Windows marks the window "not responding" and ends the program when it is clicked (ee_live.cpp, while_pumping).
+         ps2::g_options.keep_alive = [] { poll(); };
+         const int result = emulate();
++#ifdef NFSHP2_RETROACHIEVEMENTS
++        nfshp2::achievements::shutdown();
++#endif
+         finish_audio();
+ #ifdef __APPLE__
+         destroy_metal_view();

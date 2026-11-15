@@ -1,0 +1,14 @@
+diff --git a/host/window.cpp b/host/window.cpp
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -765,5 +765,9 @@ void poll_port(int port) {
+     std::uint16_t pressed = 0;
+     std::uint8_t l2 = 0xFF, r2 = 0xFF;
+     std::uint8_t lx = 0x80, ly = 0x80, rx = 0x80, ry = 0x80;
+-    if (port == 0) read_keyboard(pressed, lx, ly, rx, ry);
++    // Steam's desktop layout can also send keyboard and mouse events for the
++    // same controller. Do not merge those into player 1 while a pad is present.
++    // Physical keyboard controls still work when the pad is disconnected.
++    static const bool keyboard_with_pad = ps2::os::env("PS2_KEYBOARD_WITH_PAD") == "1";
++    if (port == 0 && (!pad || keyboard_with_pad)) read_keyboard(pressed, lx, ly, rx, ry);
+     if (pad) {

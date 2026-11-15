@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch a pinned community patch privately after validating the input disc."""
+"""Fetch the pinned widescreen and controller patch after validating the disc."""
 import hashlib
 import importlib.util
 from pathlib import Path
@@ -23,7 +23,7 @@ def main():
     spec.loader.exec_module(pnach)
     serial, _, data = pnach.read_program(sys.argv[1])
     if serial != 'SLUS-20362' or hashlib.sha256(data).hexdigest() != ELF_SHA256:
-        sys.exit('Widescreen currently supports only the verified US SLUS-20362 executable. '
+        sys.exit('Community patches currently support only the verified US SLUS-20362 executable. '
                  'The PAL release can share its CRC, so CRC alone is insufficient.')
     target = root / '.local/widescreen' / NAME
     if target.exists():
@@ -33,7 +33,7 @@ def main():
         with urllib.request.urlopen(URL, timeout=30) as response:
             patch = response.read(1 << 20)
     if hashlib.sha256(patch).hexdigest() != PATCH_SHA256:
-        sys.exit('Widescreen patch checksum mismatch; refusing to apply it.')
+        sys.exit('Community patch checksum mismatch; refusing to apply it.')
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
         temporary = target.with_suffix('.download')

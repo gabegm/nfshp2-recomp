@@ -1,0 +1,135 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -476,6 +476,23 @@
+         target_sources(ps2run PRIVATE host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp)
+         target_compile_definitions(ps2run PRIVATE PS2_WINDOW)
+         target_link_libraries(ps2run PRIVATE SDL2::SDL2)
++        if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND DEFINED ENV{NFSHP2_REPO_ROOT})
++            enable_language(C)
++            set(NFSHP2_ROOT "$ENV{NFSHP2_REPO_ROOT}")
++            set(RCHEEVOS_ROOT "${NFSHP2_ROOT}/.local/rcheevos")
++            file(GLOB RACHEEVOS_SOURCES CONFIGURE_DEPENDS
++                "${RCHEEVOS_ROOT}/src/*.c" "${RCHEEVOS_ROOT}/src/rapi/*.c"
++                "${RCHEEVOS_ROOT}/src/rcheevos/*.c" "${RCHEEVOS_ROOT}/src/rhash/*.c")
++            list(REMOVE_ITEM RACHEEVOS_SOURCES
++                "${RCHEEVOS_ROOT}/src/rc_libretro.c" "${RCHEEVOS_ROOT}/src/rc_client_external.c")
++            add_library(nfshp2_rcheevos STATIC ${RACHEEVOS_SOURCES})
++            target_include_directories(nfshp2_rcheevos PUBLIC "${RCHEEVOS_ROOT}/include")
++            target_compile_definitions(nfshp2_rcheevos PRIVATE RC_DISABLE_LUA RC_CLIENT_SUPPORTS_HASH)
++            target_compile_definitions(ps2run PRIVATE RC_CLIENT_SUPPORTS_HASH NFSHP2_RETROACHIEVEMENTS)
++            target_sources(ps2run PRIVATE "${NFSHP2_ROOT}/src/retroachievements.cpp")
++            target_include_directories(ps2run PRIVATE "${NFSHP2_ROOT}/src")
++            target_link_libraries(ps2run PRIVATE nfshp2_rcheevos)
++        endif()
+         if(WIN32)
+             add_custom_command(TARGET ps2run POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL2::SDL2> $<TARGET_FILE_DIR:ps2run>)
+             # Microsoft's shader compiler for Direct3D 12 (scripts/fetch_dxc.sh): used when the two DLLs sit next to ps2run.exe,
+diff --git a/host/main.cpp b/host/main.cpp
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -9,6 +9,9 @@
+ #include "big_stack_thread.hpp"
+ #ifdef PS2_WINDOW
+ #include "window.hpp"
++#endif
++#ifdef NFSHP2_RETROACHIEVEMENTS
++#include "retroachievements.hpp"
+ #endif
+ #ifdef PS2_PROFILE
+ #include "profile.hpp"
+@@ -774,6 +777,9 @@
+     // The window says which game runs: PS2_WINDOW_TITLE when a launcher sets it, else the disc's serial.
+     if (window && ps2::os::env("PS2_WINDOW_TITLE").empty())
+         if (const std::string serial = disc_serial(program_location); !serial.empty()) ps2::os::set_env("PS2_WINDOW_TITLE", serial);
++#ifdef NFSHP2_RETROACHIEVEMENTS
++    if (window) nfshp2::achievements::start(ps2::g_options.disc_path);
++#endif
+     if (window && !open_window(fullscreen)) return 1;
+     if (window) ps2::crash::enter_thread(ps2::crash::Thread::Gpu);  // this thread shows the pictures from now on
+ #endif
+diff --git a/host/window.cpp b/host/window.cpp
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -1,5 +1,8 @@
+ #include "window.hpp"
+ #include "big_stack_thread.hpp"
++#ifdef NFSHP2_RETROACHIEVEMENTS
++#include "retroachievements.hpp"
++#endif
+ 
+ #include "ps2/system.hpp"
+ 
+@@ -1290,6 +1293,18 @@
+ }
+ 
+ void show_notice() {
++#ifdef NFSHP2_RETROACHIEVEMENTS
++    if (std::string message = nfshp2::achievements::take_notice(); !message.empty()) {
++        g_notice_text = message;
++        g_notice_until = SDL_GetTicks() + 5000;
++        if (!g_menu.is_open()) {
++            g_note_text = message;
++            g_note_until = SDL_GetTicks() + 3500;
++            menu_paint(false);
++        }
++        refresh_title();
++    }
++#endif
+     ps2::QuickNotice n;
+     if (ps2::quick_notice(n)) {
+         g_notice_text = n.text;
+@@ -1661,6 +1676,9 @@
+ FrameLog g_frame_log;
+ 
+ void on_vblank() {
++#ifdef NFSHP2_RETROACHIEVEMENTS
++    nfshp2::achievements::frame();
++#endif
+     show_speed();
+     poll();
+     present();
+@@ -1669,6 +1687,9 @@
+     if (g_menu.is_open()) {  // the quick menu: this thread is the window's too, so it answers the window while the game waits
+         const double since = audio_seconds();
+         while (g_menu.is_open()) {
++#ifdef NFSHP2_RETROACHIEVEMENTS
++            nfshp2::achievements::idle();
++#endif
+             poll();
+             SDL_Delay(10);
+         }
+@@ -1681,7 +1702,12 @@
+ void hold_for_menu() {
+     if (!g_menu_hold.load(std::memory_order_acquire)) return;
+     const double since = audio_seconds();
+-    while (g_menu_hold.load(std::memory_order_acquire)) std::this_thread::sleep_for(std::chrono::milliseconds(2));
++    while (g_menu_hold.load(std::memory_order_acquire)) {
++#ifdef NFSHP2_RETROACHIEVEMENTS
++        nfshp2::achievements::idle();
++#endif
++        std::this_thread::sleep_for(std::chrono::milliseconds(2));
++    }
+     if (g_pipe) g_pipe->note_wait(audio_seconds() - since);  // the wait is no slowness of the game: no stretched sound after it
+     g_last = 0;
+ }
+@@ -2108,6 +2134,9 @@
+         return result;
+     }
+     ps2::g_options.on_vblank = [] {
++#ifdef NFSHP2_RETROACHIEVEMENTS
++        nfshp2::achievements::frame();
++#endif
+         const auto t0 = WaitLog::Clock::now();
+         ps2::post_present();
+         const auto t1 = WaitLog::Clock::now();
+@@ -2177,6 +2206,9 @@
+     }
+     emulation.join();
+     ps2::flush_memory_card();
++#ifdef NFSHP2_RETROACHIEVEMENTS
++    nfshp2::achievements::shutdown();
++#endif
+     finish_audio();
+ #ifdef __APPLE__
+     destroy_metal_view();

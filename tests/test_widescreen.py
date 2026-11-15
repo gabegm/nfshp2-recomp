@@ -94,7 +94,8 @@ class LauncherTests(unittest.TestCase):
             '(root/"nointro-source.txt").write_text(sys.argv[1])\n'
             'print(root/".local/intro-patch.txt")\n')
         upstream = self.root / '.local/ps2-native-recomp'
-        for game in ('nfshp2', 'nfshp2-wide', 'nfshp2-lang', 'nfshp2-wide-lang'):
+        for game in ('nfshp2', 'nfshp2-wide', 'nfshp2-lang', 'nfshp2-wide-lang',
+                     'nfshp2-modern', 'nfshp2-wide-lang-modern'):
             disc = upstream / 'games' / game / 'disc'
             disc.mkdir(parents=True)
             (disc / 'SYSTEM.CNF').write_text('BOOT2 = cdrom0:\\BOOT.ELF;1\n')
@@ -102,9 +103,11 @@ class LauncherTests(unittest.TestCase):
             runner.parent.mkdir(parents=True)
             runner.write_text('#!/usr/bin/env python3\nimport json,os,sys\n'
                               'print(json.dumps({"args":sys.argv,"tile":os.getenv("PS2_TILE"),'
-                              '"keys":os.getenv("PS2_KEYS"),"decode":os.getenv("PS2_DECODE")}))\n')
+                              '"keys":os.getenv("PS2_KEYS"),"decode":os.getenv("PS2_DECODE"),'
+                              '"scale":os.getenv("PS2_SCALE")}))\n')
             runner.chmod(0o755)
-        for game in ('nfshp2-wide', 'nfshp2-lang', 'nfshp2-wide-lang'):
+        for game in ('nfshp2-wide', 'nfshp2-lang', 'nfshp2-wide-lang',
+                     'nfshp2-modern', 'nfshp2-wide-lang-modern'):
             (upstream / 'games' / game / 'patches.txt').write_text('')
         self.environment = {k: v for k, v in os.environ.items() if not k.startswith('PS2_')}
 
@@ -120,6 +123,47 @@ class LauncherTests(unittest.TestCase):
         self.assertNotIn('--widescreen', run['args'])
         self.assertEqual(run['tile'], '4')
         self.assertEqual(run['decode'], '0')
+        self.assertIsNone(run['scale'])
+
+    def test_private_settings_select_profile_and_runner_arguments(self):
+        (self.root / '.local/play.conf').write_text(
+            '# personal launch settings\n'
+            'performance = true\n'
+            'nointro = yes\n'
+            'widescreen = on\n'
+            'PS2_TILE = 8\n'
+            'arg = --fullscreen\n'
+            'arg = --press\n'
+            'arg = 100:start\n')
+        result = self.launch('--frames', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run = json.loads(result.stdout)
+        args = run['args']
+        self.assertEqual(args[1], 'games/nfshp2-wide/patched/BOOT.ELF')
+        self.assertEqual(run['tile'], '8')
+        self.assertIn('--widescreen', args)
+        self.assertIn('--fullscreen', args)
+        self.assertEqual(args[args.index('--press') + 1], '100:start')
+        self.assertIn(str(self.root / '.local/intro-patch.txt'), args)
+        self.assertIsNone(run['scale'])
+
+    def test_cli_and_environment_override_private_settings(self):
+        (self.root / '.local/play.conf').write_text(
+            'widescreen = true\nnointro = true\nperformance = true\nPS2_TILE = 8\n')
+        self.environment['PS2_TILE'] = '16'
+        result = self.launch('--no-widescreen', '--no-nointro', '--no-performance')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run = json.loads(result.stdout)
+        self.assertEqual(run['args'][1], 'games/nfshp2/disc/BOOT.ELF')
+        self.assertNotIn('--patches', run['args'])
+        self.assertEqual(run['tile'], '16')
+        self.assertIsNone(run['decode'])
+
+    def test_invalid_private_setting_fails_before_launch(self):
+        (self.root / '.local/play.conf').write_text('unexpected = true\n')
+        result = self.launch()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('play.conf:1: unknown setting unexpected', result.stderr)
 
     def test_tile_size_respects_explicit_override(self):
         self.environment['PS2_TILE'] = '8'
@@ -162,6 +206,25 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual(args[args.index('--patches') + 1], f'games/{game}/patches.txt')
                 self.assertEqual(args[args.index('--quick-dir') + 1], f'games/{game}')
                 self.assertEqual(args.count('--widescreen'), int('wide' in game))
+
+    def test_modern_controls_selects_a_separate_patched_profile(self):
+        (self.root / '.local/play.conf').write_text(
+            'widescreen = true\nmultilanguage = true\nmodern_controls = true\n')
+        result = self.launch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('press left/right to choose Setup E-H', result.stderr)
+        args = json.loads(result.stdout)['args']
+        self.assertEqual(args[1], 'games/nfshp2-wide-lang-modern/patched/BOOT.ELF')
+        self.assertEqual(args[args.index('--patches') + 1],
+                         'games/nfshp2-wide-lang-modern/patches.txt')
+        result = self.launch('--no-modern-controls')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['args'][1],
+                         'games/nfshp2-wide-lang/patched/BOOT.ELF')
+        result = self.launch('--no-widescreen', '--no-multilanguage')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['args'][1],
+                         'games/nfshp2-modern/patched/BOOT.ELF')
 
     def test_nointro_combines_with_each_profile_without_controller_presses(self):
         for flags, game in [(('--nointro', '--performance'), 'nfshp2'),

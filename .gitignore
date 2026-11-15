@@ -11,6 +11,7 @@
 !/scripts/build.sh
 !/scripts/check-public-files.py
 !/scripts/play.sh
+!/scripts/ra-login.py
 !/scripts/fetch-widescreen.py
 !/scripts/multilanguage.py
 !/scripts/nointro.py
@@ -27,6 +28,7 @@
 !/tests/
 /tests/*
 !/tests/test_widescreen.py
+!/tests/test_ra_login.py
 !/tests/test_multilanguage.py
 !/tests/test_nointro.py
 !/tests/test_runtime_patches.py
@@ -37,6 +39,16 @@
 !/patches/
 /patches/*
 !/patches/runtime-compatibility.patch
+!/patches/controller-input.patch
+!/patches/controller-menu.patch
+!/patches/controller-menu-input.patch
+!/patches/controller-disconnect.patch
+!/patches/retroachievements.patch
+!/patches/retroachievements-state.patch
+!/src/
+/src/*
+!/src/retroachievements.cpp
+!/src/retroachievements.hpp
 !/patches/presentation-performance.patch
 !/patches/graphics-profiling.patch
 !/patches/raster-specialization.patch

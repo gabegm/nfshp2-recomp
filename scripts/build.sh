@@ -2,6 +2,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 revision=5d1ebbcf133cb3c31df75a294dbe38e30734c1ce
+ra_revision=2ad0b8672f68a48148620164510b963039e49eb1
 upstream="${NFSHP2_UPSTREAM:-$root/.local/ps2-native-recomp}"
 if [ $# -lt 1 ] || [ ! -f "$1" ]; then
   echo 'Usage: bash scripts/build.sh "/absolute/path/to/your/disc.iso" [port.sh options]' >&2
@@ -16,22 +17,27 @@ shift
 game=nfshp2
 wide=0
 multilanguage=0
+modern_controls=0
 port_args=()
 for arg in "$@"; do
   if [ "$arg" = "--widescreen" ]; then
     wide=1
   elif [ "$arg" = "--multilanguage" ]; then
     multilanguage=1
+  elif [ "$arg" = "--modern-controls" ]; then
+    modern_controls=1
   else
     port_args+=("$arg")
   fi
 done
 if [ "$wide" = 1 ]; then game+=-wide; fi
 if [ "$multilanguage" = 1 ]; then game+=-lang; fi
+if [ "$modern_controls" = 1 ]; then game+=-modern; fi
 if [ -d "$root/.local/deps" ]; then
   export CMAKE_PREFIX_PATH="$root/.local/deps${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
   export PKG_CONFIG_PATH="$root/.local/deps/lib64/pkgconfig:$root/.local/deps/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   export LD_LIBRARY_PATH="$root/.local/deps/lib64:$root/.local/deps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  export CPLUS_INCLUDE_PATH="$root/.local/deps/include${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
 fi
 command -v pkg-config >/dev/null
 pkg-config --exists sdl2 || {
@@ -42,6 +48,14 @@ if pkg-config --exists x11; then
   export CPLUS_INCLUDE_PATH="$(pkg-config --variable=includedir x11)${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
 fi
 mkdir -p "$root/.local"
+if [ ! -d "$root/.local/rcheevos/.git" ]; then
+  git clone --depth 1 --branch v12.4.0 https://github.com/RetroAchievements/rcheevos.git "$root/.local/rcheevos"
+fi
+if [ "$(git -C "$root/.local/rcheevos" rev-parse HEAD)" != "$ra_revision" ]; then
+  echo "Expected rcheevos revision $ra_revision; inspect the local checkout before proceeding." >&2
+  exit 1
+fi
+export NFSHP2_REPO_ROOT="$root"
 if [ ! -d "$upstream/.git" ]; then
   git clone https://github.com/exoteric33/ps2-native-recomp.git "$upstream"
   git -C "$upstream" checkout --detach "$revision"
@@ -59,7 +73,13 @@ if ! (cd "$upstream" && ROOT="$upstream" cxx_tools=1 bash -c '. scripts/cxx.sh' 
   exit 1
 fi
 python3 "$root/scripts/apply-runtime-patches.py" "$upstream" \
-  "$root/patches/runtime-compatibility.patch"
+  "$root/patches/runtime-compatibility.patch" \
+  "$root/patches/controller-input.patch" \
+  "$root/patches/controller-menu.patch" \
+  "$root/patches/controller-menu-input.patch" \
+  "$root/patches/controller-disconnect.patch" \
+  "$root/patches/retroachievements.patch" \
+  "$root/patches/retroachievements-state.patch"
 if [ "$wide" = 1 ]; then
   wide_patch=$(python3 "$root/scripts/fetch-widescreen.py" "$image")
   port_args+=(--widescreen --pnach "$wide_patch" --pnach-section 'Widescreen 16:9' --pnach-section 'HUD fixed for widescreen')
@@ -69,6 +89,13 @@ if [ "$wide" = 1 ]; then
     [ -f "$program" ] || continue
     [ -e "$upstream/games/$game/vu1/$(basename "$program")" ] || cp "$program" "$upstream/games/$game/vu1/"
   done
+fi
+if [ "$modern_controls" = 1 ]; then
+  if [ "$wide" != 1 ]; then
+    controls_patch=$(python3 "$root/scripts/fetch-widescreen.py" "$image")
+    port_args+=(--pnach "$controls_patch")
+  fi
+  port_args+=(--pnach-section 'Trigger control mappings')
 fi
 if [ "$multilanguage" = 1 ]; then
   language_patch=$(python3 "$root/scripts/multilanguage.py" "$image")
@@ -85,9 +112,10 @@ export PS2_JOBS="${PS2_JOBS:-4}"
 export CCACHE_DIR="$root/.local/ccache"
 bash scripts/setup.sh --native-only
 bash scripts/port.sh "$game" "$image" --native-only "${port_args[@]}"
-if [ "$wide" = 1 ] || [ "$multilanguage" = 1 ]; then
+if [ "$wide" = 1 ] || [ "$multilanguage" = 1 ] || [ "$modern_controls" = 1 ]; then
   launch=(bash scripts/play.sh)
   if [ "$wide" = 1 ]; then launch+=(--widescreen); fi
   if [ "$multilanguage" = 1 ]; then launch+=(--multilanguage); fi
-  echo "From the setup directory, play with: ${launch[*]} --performance"
+  if [ "$modern_controls" = 1 ]; then launch+=(--modern-controls); fi
+  echo "From the setup directory, play with: ${launch[*]}"
 fi

@@ -1,0 +1,18 @@
+diff --git a/host/window.cpp b/host/window.cpp
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -1155,2 +1155,9 @@ bool menu_event(const SDL_Event &e) {
+     using quickmenu::Command;
++    // Steam's desktop layout may send Escape or Enter along with a controller
++    // button. Keep those duplicate keys from instantly closing the menu.
++    // F1 remains available even when a controller is connected.
++    static const bool keyboard_with_pad = ps2::os::env("PS2_KEYBOARD_WITH_PAD") == "1";
++    if (g_menu.is_open() && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
++        (g_pads[0] || g_pads[1]) && !keyboard_with_pad && e.key.keysym.scancode != SDL_SCANCODE_F1)
++        return true;
+     if (!g_menu.is_open()) {
+@@ -1230,3 +1237,3 @@ bool menu_event(const SDL_Event &e) {
+         case SDL_CONTROLLER_BUTTON_GUIDE: close_menu("the Guide button"); break;
+-        case SDL_CONTROLLER_BUTTON_START: close_menu("Start"); break;
++        case SDL_CONTROLLER_BUTTON_START: if (SDL_GetTicks() - g_menu_opened_ticks >= 300) close_menu("Start"); break;
+         default: break;
