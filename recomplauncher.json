@@ -1,0 +1,82 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Need for Speed: Hot Pursuit 2 PS2 Recomp",
+  "repo": "gabegm/nfshp2-recomp",
+  "game": {
+    "kind": "iso",
+    "label": "Your US PS2 Need for Speed: Hot Pursuit 2 disc image (SLUS-20362, .iso).",
+    "check": { "iso9660": "SLUS_203.62" }
+  },
+  "prepare": {
+    "program": ["nfshp2-launcher"],
+    "args": ["--prepare", "{game}"],
+    "label": "Compile the Linux runner from your disc image; this can take a while",
+    "timeout": 7200
+  },
+  "start": {
+    "program": ["nfshp2-launcher"],
+    "args": ["--play", "{game}"]
+  },
+  "config": [
+    {
+      "format": "ini",
+      "file": [{ "path": "{install}/.local/play.conf" }],
+      "new": {
+        "widescreen": "true",
+        "multilanguage": "true",
+        "modern_controls": "true",
+        "nointro": "true",
+        "performance": "false",
+        "achievements": "true",
+        "arg": "--fullscreen"
+      }
+    }
+  ],
+  "settings": [
+    {
+      "id": "display",
+      "label": "Display mode",
+      "choices": [
+        { "label": "Borderless full screen", "set": { "arg": "--fullscreen" } },
+        { "label": "Windowed", "set": { "arg": "--window" } }
+      ],
+      "defaults": { "arg": "--fullscreen" }
+    },
+    {
+      "id": "nointro",
+      "label": "Skip intro videos",
+      "choices": [
+        { "label": "On", "set": { "nointro": "true" } },
+        { "label": "Off", "set": { "nointro": "false" } }
+      ],
+      "defaults": { "nointro": "true" }
+    },
+    {
+      "id": "achievements",
+      "label": "RetroAchievements",
+      "help": "Requires a one-time sign-in from a terminal with scripts/play.sh --ra-login.",
+      "choices": [
+        { "label": "On", "set": { "achievements": "true" } },
+        { "label": "Off", "set": { "achievements": "false" } }
+      ],
+      "defaults": { "achievements": "true" }
+    },
+    {
+      "id": "performance",
+      "label": "Reduced graphics workload",
+      "help": "May reduce rendering quality. Leave off if the game runs smoothly.",
+      "choices": [
+        { "label": "Off", "set": { "performance": "false" } },
+        { "label": "On", "set": { "performance": "true" } }
+      ],
+      "defaults": { "performance": "false" },
+      "advanced": true
+    }
+  ],
+  "saves": [
+    "{install}/.local/ps2-native-recomp/games/nfshp2/player.ps2",
+    "{install}/.local/ps2-native-recomp/games/nfshp2/keys.ini",
+    "{install}/.local/play.conf"
+  ]
+}

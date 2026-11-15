@@ -4,6 +4,9 @@ import subprocess
 import sys
 
 allowed = {
+    'recomplauncher.json',
+    'scripts/package-linux.sh',
+    'scripts/nfshp2-launcher',
     'scripts/build-play-gs-smoke.py',
     'tools/play-gs-smoke/CMakeLists.txt',
     'tools/play-gs-smoke/main.cpp',

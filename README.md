@@ -12,9 +12,35 @@ This setup supports a locally built **Linux x86_64** runner. It has been built
 and launched on Fedora/Aurora Linux. The RetroAchievements integration is
 compiled on Linux only. Steam Deck uses Linux, but this setup has not been
 verified on Steam Deck hardware. Windows and macOS builds are not supported by
-these setup scripts. Releases contain the setup source and patches; you supply
-your own PS2 disc image and build the runner locally. No game data or prebuilt
-game executable is distributed.
+these setup scripts. Linux releases contain an executable launcher, setup
+scripts, and patches. You supply your own PS2 disc image and build the runner
+locally. No game data or prebuilt game executable is distributed.
+
+### Linux release launcher
+
+The `Linux-x64.tar.gz` release asset can be installed through
+[RecompLauncher](https://recomplauncher.com/). Its setup screen checks your US
+PS2 ISO, then the packaged `nfshp2-launcher` builds the runner in the install
+folder. The first setup needs the build tools listed below and network access;
+it can take a while. Play starts the compiled game directly. RecompLauncher's
+settings page offers borderless full screen or windowed mode, intro skipping,
+RetroAchievements, and the optional reduced graphics workload. Widescreen,
+multilanguage, and modern controls are included in this release profile. The
+game's F1 menu controls internal resolution; hold Start for its
+controller-accessible menu.
+
+For a manual install, extract the archive and run:
+
+```sh
+./nfshp2-launcher --prepare "/absolute/path/to/your/disc.iso"
+./nfshp2-launcher --play "/absolute/path/to/your/disc.iso"
+```
+
+You can also run `./nfshp2-launcher "/absolute/path/to/your/disc.iso"` to
+build if needed and then play. Settings and generated game files stay in that
+installation's `.local/` directory. The release archive contains neither an
+ISO nor a compiled game runner. To sign in to RetroAchievements from a terminal,
+run `bash scripts/play.sh --ra-login` in the extracted folder.
 
 ## Build locally
 

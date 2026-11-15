@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd "$(dirname "$0")" && pwd)"
+if [ ! -f "$root/scripts/build.sh" ]; then
+  root="$(cd "$root/.." && pwd)"
+fi
+
+usage() {
+  cat <<'HELP'
+Usage: nfshp2-launcher --prepare DISC.iso
+       nfshp2-launcher --play DISC.iso [runner arguments]
+       nfshp2-launcher DISC.iso [runner arguments]
+The first form builds from your own US PS2 disc image.
+The last form builds if needed, then plays.
+HELP
+}
+
+case "${1:-}" in
+  --help|-h) usage; exit 0 ;;
+  --prepare) mode=prepare; shift ;;
+  --play) mode=play; shift ;;
+  *) mode=auto ;;
+esac
+if [ $# -lt 1 ] || [ ! -f "$1" ]; then
+  usage >&2
+  exit 2
+fi
+iso="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+case "${iso,,}" in
+  *.iso) ;;
+  *) echo 'Provide a .iso image of the US PS2 release.' >&2; exit 2 ;;
+esac
+shift
+if [ "$mode" = prepare ] && [ $# -ne 0 ]; then
+  usage >&2
+  exit 2
+fi
+
+game_dir="$root/.local/ps2-native-recomp/games/nfshp2-wide-lang-modern"
+runner="$root/.local/ps2-native-recomp/build/native-nfshp2-wide-lang-modern/ps2run"
+ready() {
+  [ -x "$runner" ] && [ -f "$game_dir/patches.txt" ] &&
+    [ -f "$game_dir/disc.iso" ] && [ "$iso" -ef "$game_dir/disc.iso" ]
+}
+
+if [ "$mode" = prepare ] || { [ "$mode" = auto ] && ! ready; }; then
+  bash "$root/scripts/build.sh" "$iso" --widescreen --multilanguage --modern-controls --no-explore
+fi
+
+mkdir -p "$root/.local"
+settings="$root/.local/play.conf"
+if [ ! -e "$settings" ]; then
+  umask 077
+  cat > "$settings" <<'SETTINGS'
+widescreen = true
+multilanguage = true
+modern_controls = true
+nointro = true
+performance = false
+achievements = true
+arg = --fullscreen
+SETTINGS
+fi
+
+if [ "$mode" = prepare ]; then
+  exit 0
+fi
+if ! ready; then
+  echo 'This disc has not been prepared. Run nfshp2-launcher --prepare DISC.iso first.' >&2
+  exit 1
+fi
+exec bash "$root/scripts/play.sh" "$@"

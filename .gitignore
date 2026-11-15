@@ -3,6 +3,7 @@
 !/.gitignore
 !/.gitattributes
 !/README.md
+!/recomplauncher.json
 !/OPTIMIZATION.md
 !/NATIVE_RENDERER.md
 !/LICENSE
@@ -11,6 +12,8 @@
 !/scripts/build.sh
 !/scripts/check-public-files.py
 !/scripts/play.sh
+!/scripts/package-linux.sh
+!/scripts/nfshp2-launcher
 !/scripts/ra-login.py
 !/scripts/fetch-widescreen.py
 !/scripts/multilanguage.py
